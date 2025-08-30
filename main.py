@@ -15,7 +15,8 @@ import numpy as np
 
 # ——— Importy projektowe (pliki w katalogu głównym projektu) ———
 from config_models import load_and_validate_config, generate_experiments, resolve_output_paths  # type: ignore
-#from data_loader import load_symbol_history  # założenie kontraktu (patrz sekcja Założenia)  # type: ignore
+from data_loader import pobierz_dane_akcji # type: ignore
+from data_loader import pobierz_dane_sp500 # type: ignore
 from data_preprocessing import prepare_data  # type: ignore
 from autotune import autotune_keras  # type: ignore
 from model_trainer import train_model, make_validation_split  # type: ignore
@@ -24,7 +25,8 @@ from predictor import Predictor  # type: ignore
 from ensemble_builder import build_ensemble  # type: ignore
 from super_ensemble import SuperEnsemble  # type: ignore
 from model_registry import validate_model_name  # type: ignore
-
+from pathlib import Path
+BASE_DIR = Path(__file__).resolve().parent.parent
 LOGGER = logging.getLogger(__name__)
 
 
@@ -42,12 +44,12 @@ def setup_logging(verbosity: int = 1) -> None:
 
 
 def load_config_dynamic(path_like: str | Path):
-    """Wczytuje YAML i zwraca obiekt Config."""
     cfg_path = Path(path_like)
+    if not cfg_path.is_absolute():
+        cfg_path = BASE_DIR / cfg_path
     if not cfg_path.exists():
-        raise FileNotFoundError(f"Nie znaleziono pliku konfiguracyjnego: {path_like}")
+        raise FileNotFoundError(f"Nie znaleziono pliku konfiguracyjnego: {cfg_path}")
     return load_and_validate_config(cfg_path)
-
 
 def build_outputs(symbol: str, cfg, loss: str, probe: str) -> dict[str, Path]:
     """Zwraca słownik ścieżek wyjściowych i tworzy katalogi."""
@@ -123,8 +125,10 @@ def _fetch_data(symbol: str, cfg) -> tuple[np.ndarray | dict[str, np.ndarray], n
     end_date = getattr(data_dates, "end_date", None) if data_dates else None
 
     LOGGER.info("Wczytywanie danych (%s)...", symbol)
-    raw_df = load_symbol_history(symbol, start=start_date, end=end_date)
-    sp500_df = load_symbol_history("^GSPC", start=start_date, end=end_date)
+    raw_df = pobierz_dane_akcji(symbol, data_start=start_date, data_end=end_date)
+    print(f"Loaded raw_df for {symbol}: {raw_df.shape}")
+    sp500_df = pobierz_dane_sp500(data_start=start_date, data_end=end_date)
+    print(f"Loaded sp500_df: {sp500_df.shape}")
 
     params_for_prep = {
         "sequence_length": cfg.data.sequence_length,

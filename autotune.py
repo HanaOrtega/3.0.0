@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
-from .model_builder import build_model
-from .model_registry import requires_tft_input
-from .model_trainer import make_validation_split
+from model_builder import build_model
+from model_registry import requires_tft_input
+from model_trainer import make_validation_split
 
 LOGGER = logging.getLogger(__name__)
 
@@ -207,7 +207,7 @@ def autotune_keras(
                     return self.hp.Int(name, min_value=low, max_value=high, step=step)
                 def suggest_float(self, name, low, high, log=False):
                     if log:
-                        return self.hp.Float(name, min_value=low, max_value=high, sampling="log", max_value=high)
+                        return self.hp.Float(name, min_value=low, max_value=high, sampling="log")
                     return self.hp.Float(name, min_value=low, max_value=high)
                 def suggest_categorical(self, name, choices):
                     return self.hp.Choice(name, values=list(choices))

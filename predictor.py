@@ -9,8 +9,8 @@ from typing import Any
 
 import numpy as np
 
-from .model_registry import requires_tft_input, standardize_preds
-from .model_saver_loader import load_model_bundle
+from model_registry import requires_tft_input, standardize_preds
+from model_saver_loader import load_model_bundle
 
 LOGGER = logging.getLogger(__name__)
 

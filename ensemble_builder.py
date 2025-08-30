@@ -10,8 +10,8 @@ from typing import Any
 
 import numpy as np
 
-from .predictor import Predictor
-from .model_registry import standardize_preds
+from predictor import Predictor
+from model_registry import standardize_preds
 
 LOGGER = logging.getLogger(__name__)
 

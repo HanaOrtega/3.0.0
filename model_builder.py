@@ -17,7 +17,7 @@ except Exception as e:  # pragma: no cover - środowiska bez TF
         "Zainstaluj tensorflow>=2.12."
     ) from e
 
-from .model_registry import ModelType, requires_tft_input
+from model_registry import ModelType, requires_tft_input
 
 LOGGER = logging.getLogger(__name__)
 

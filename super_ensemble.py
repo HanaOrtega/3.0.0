@@ -10,8 +10,8 @@ from typing import Any
 import numpy as np
 from sklearn.linear_model import Ridge
 
-from .predictor import Predictor
-from .model_registry import requires_tft_input
+from predictor import Predictor
+from model_registry import requires_tft_input
 
 LOGGER = logging.getLogger(__name__)
 

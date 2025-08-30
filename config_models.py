@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, List
 
 import yaml
 
-#from .model_registry import ModelType, validate_model_name
+from model_registry import ModelType, validate_model_name
 
 LOGGER = logging.getLogger(__name__)
 
