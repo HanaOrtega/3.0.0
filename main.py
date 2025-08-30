@@ -145,7 +145,7 @@ def _fetch_data(symbol: str, cfg) -> tuple[np.ndarray | dict[str, np.ndarray], n
     return X_pack, Y, scalers, selected_features, meta
 
 
-def run_single_experiment(exp: dict) -> dict:
+def run_single_experiment(exp: dict, cfg) -> dict:
     """
     Wykonuje pojedynczy eksperyment dla danego modelu.
     exp: {"symbol": str, "params": dict, "paths": dict[Path] }
@@ -157,17 +157,7 @@ def run_single_experiment(exp: dict) -> dict:
     model_type = validate_model_name(params["model_type"]).value
 
     # 1) Dane
-    X_pack, Y, scalers, selected_features, meta = _fetch_data(symbol, argparse.Namespace(data=argparse.Namespace(
-        sequence_length=params["sequence_length"],
-        forecast_horizon=params["forecast_horizon"],
-        scaler=params["scaler"],
-        feature_selection=params.get("feature_selection", {}),
-        include_sp500=params.get("include_sp500", True),
-        augment=params.get("augment", {}),
-        dropna=params.get("dropna", True),
-        tft=params.get("tft", {"enable": True}),
-        start_date=None, end_date=None,
-    )))
+    X_pack, Y, scalers, selected_features, meta = _fetch_data(symbol, cfg)
 
     # 2) Train/Val split
     X_tr, Y_tr, X_val, Y_val = make_validation_split(X_pack, Y, val_fraction=0.15)
@@ -250,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     for exp in experiments:
         try:
             LOGGER.info("\n  ~~~ Start eksperymentu: %s ~~~", exp["params"]["model_type"])
-            res = run_single_experiment(exp)
+            res = run_single_experiment(exp, cfg)
             results.append(res)
         except Exception as e:
             LOGGER.error("Eksperyment (%s) nie powiódł się: %s\n%s",

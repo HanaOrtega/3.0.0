@@ -15,10 +15,26 @@ LOGGER = logging.getLogger(__name__)
 
 # yfinance jest zależnością opcjonalną na etapie importu testów;
 # importujemy leniwie wewnątrz funkcji, ale oferujemy jeden prywatny hook.
+# W pliku src/project/data_loader.py
+
 def _yf_download(symbol: str, start: Optional[str], end: Optional[str], interval: str) -> pd.DataFrame:
     """Thin wrapper na yfinance.download – osobno dla łatwego monkeypatchingu w testach."""
     import yfinance as yf  # lazy import
-    return yf.download(
+
+    # --- POCZĄTEK SEKCJI DEBUGOWANIA ---
+    print("\n" + "=" * 50)
+    print("DEBUG: Wywołanie _yf_download z parametrami:")
+    print(f"  - tickers: {symbol!r}")
+    print(f"  - start: {start!r}")
+    print(f"  - end: {end!r}")
+    print(f"  - interval: {interval!r}")
+    print(f"  - auto_adjust: False")
+    print(f"  - progress: False")
+    print(f"  - threads: True")
+    print("=" * 50)
+    # --- KONIEC SEKCJI DEBUGOWANIA ---
+
+    df = yf.download(
         tickers=symbol,
         start=start,
         end=end,
@@ -27,6 +43,17 @@ def _yf_download(symbol: str, start: Optional[str], end: Optional[str], interval
         progress=False,
         threads=True,
     )
+
+    # --- POCZĄTEK SEKCJI DEBUGOWANIA ---
+    print(f"DEBUG: yf.download zwróciło DataFrame o kształcie: {df.shape}")
+    if df.empty:
+        print("DEBUG: DataFrame jest PUSTY!")
+    else:
+        print("DEBUG: DataFrame zawiera dane.")
+    print("=" * 50 + "\n")
+    # --- KONIEC SEKCJI DEBUGOWANIA ---
+
+    return df
 
 
 @dataclass(frozen=True)

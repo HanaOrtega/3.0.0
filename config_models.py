@@ -45,6 +45,8 @@ class TrainerSpec:
 @dataclass(frozen=True)
 class DataSpec:
     """Ustawienia danych oraz przygotowania cech."""
+    start_date: str | None = None  # <-- DODAJ
+    end_date: str | None = None    # <-- DODAJ
     sequence_length: int = 30
     forecast_horizon: int = 14
     scaler: str = "minmax"
@@ -113,6 +115,8 @@ def _parse_models(raw_models: Iterable[dict[str, Any] | str]) -> list[ModelSpec]
 def _parse_data(raw: dict[str, Any] | None) -> DataSpec:
     raw = raw or {}
     return DataSpec(
+        start_date=raw.get("start_date"),  # <-- DODAJ
+        end_date=raw.get("end_date"),      # <-- DODAJ
         sequence_length=int(raw.get("sequence_length", 30)),
         forecast_horizon=int(raw.get("forecast_horizon", 14)),
         scaler=str(raw.get("scaler", "minmax")),
@@ -122,7 +126,6 @@ def _parse_data(raw: dict[str, Any] | None) -> DataSpec:
         dropna=bool(raw.get("dropna", True)),
         tft=dict(raw.get("tft", {"enable": True})),
     )
-
 
 def _parse_trainer(raw: dict[str, Any] | None) -> TrainerSpec:
     raw = raw or {}
