@@ -1,0 +1,100 @@
+# configs/config.yaml
+# Główna konfiguracja projektu
+
+# ————————————————————————————————————————————
+# Dane wyjściowe i cache
+# ————————————————————————————————————————————
+output_dir: wyniki_dla_symboli
+cache_dir: cache
+
+# ————————————————————————————————————————————
+# Specyfikacja danych
+# ————————————————————————————————————————————
+data:
+  # zakres danych historycznych
+  start_date: "2005-01-01"
+  end_date: "2025-08-28"
+
+  sequence_length: 30
+  forecast_horizon: 14
+  scaler: "minmax"
+
+  feature_selection:
+    method: "rfe"
+    top_k: 30
+
+  include_sp500: true
+
+  augment:
+    noise_level: 0.01
+    times: 1
+
+  dropna: true
+
+  tft:
+    enable: true
+    categorical_features: ["dayofweek", "month"]
+    known_future_features: ["volume"]
+
+# ————————————————————————————————————————————
+# Trening
+# ————————————————————————————————————————————
+trainer:
+  epochs: 50
+  batch_size: 64
+  patience: 8
+  min_delta: 0.0005
+  reduce_lr_patience: 4
+  reduce_lr_factor: 0.5
+  shuffle: true
+  checkpoint_dir: "checkpoints"
+
+# ————————————————————————————————————————————
+# Modele – każdy z własnymi parametrami
+# ————————————————————————————————————————————
+models:
+  - name: "LSTM"
+    enable: true
+    params:
+      units: 128
+      layers: 2
+      dropout: 0.2
+
+  - name: "GRU"
+    enable: true
+    params:
+      units: 128
+      layers: 2
+      dropout: 0.2
+
+  - name: "CNN-LSTM"
+    enable: true
+    params:
+      filters: 64
+      units: 128
+      dropout: 0.25
+
+  - name: "TRANSFORMER"
+    enable: true
+    params:
+      d_model: 128
+      heads: 4
+      ff_dim: 256
+      blocks: 2
+      dropout: 0.1
+
+  - name: "TFT"
+    enable: true
+    params:
+      units: 64
+      dropout: 0.2
+
+# ————————————————————————————————————————————
+# Autotune – KerasTuner domyślny
+# ————————————————————————————————————————————
+autotune:
+  enabled: true
+  engine: "kerastuner"   # "optuna" lub "kerastuner"
+  n_trials: 15
+  timeout: 600           # sekundy (10 min na cały tuning)
+  direction: "minimize"  # optymalizujemy val_loss
