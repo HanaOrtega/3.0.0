@@ -9,7 +9,61 @@ Wszystko trafia na jeden wykres: formacje, wskaźniki, sugerowany kierunek
 transakcji (**LONG / SHORT / NEUTRALNY**) i **prognozowany stożek ceny
 rozciągnięty w przyszłość** za ostatnią świecą.
 
-## Instalacja
+## GUI (platforma) — najszybszy start
+
+Wszystkie trzy moduły projektu (sygnał ML + wykres, backtest, sentyment z X)
+są dostępne w jednym interfejsie graficznym (`app.py`, [Streamlit](https://streamlit.io)).
+
+### Wymagana wersja Pythona
+
+**Python 3.11** (projekt testowany na 3.11.15; powinien też działać na 3.10 i
+3.12 - jedyne twarde wymaganie to `scikit-learn>=1.3`, które wspiera 3.9-3.12).
+Playwright (zakładka sentymentu) wymaga Pythona 3.9+.
+
+### Instalacja i uruchomienie (terminal / dowolny system)
+
+```bash
+cd pattern_ml
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt -r requirements-gui.txt
+# opcjonalnie, jeśli chcesz też zakładkę "Sentyment z X":
+pip install -r requirements-news.txt
+
+streamlit run app.py
+```
+
+Otworzy się przeglądarka pod `http://localhost:8501` z czterema zakładkami:
+**Sygnał ML**, **Backtest**, **Sentyment z X**, **Informacje**. Wynik
+zakładki "Sentyment z X" (po zaznaczeniu checkboxa) automatycznie zasila
+zakładkę "Sygnał ML" jako dodatkowe cechy - bez ręcznego przenoszenia plików.
+
+### Uruchomienie w PyCharm
+
+1. **Otwórz folder `pattern_ml/` jako projekt** w PyCharm (File → Open).
+2. **Ustaw interpreter Pythona 3.11**: File → Settings → Project → Python
+   Interpreter → Add Interpreter → Add Local Interpreter → Virtualenv
+   Environment → New, wskaż Python 3.11 jako bazowy interpreter, lokalizacja
+   `pattern_ml/.venv`. Jeśli masz już utworzone `.venv` z kroku wyżej, wybierz
+   zamiast tego "Existing environment" i wskaż `pattern_ml/.venv/bin/python`.
+3. **Zainstaluj zależności** w zintegrowanym terminalu PyCharm (View → Tool
+   Windows → Terminal - automatycznie użyje interpretera projektu):
+   ```bash
+   pip install -r requirements.txt -r requirements-gui.txt -r requirements-news.txt
+   ```
+4. **Uruchom aplikację** - najprościej z tego samego terminala:
+   ```bash
+   streamlit run app.py
+   ```
+   Alternatywnie, żeby mieć klikalny przycisk ▶ Run: Run → Edit Configurations
+   → **+** → Python, w polu "Script path" wybierz interpreter modułu zamiast
+   skryptu - ustaw "Module name" na `streamlit`, a w "Parameters" wpisz
+   `run app.py`. Working directory ustaw na katalog `pattern_ml/`.
+5. Do zakładki "Sentyment z X" ustaw zmienne środowiskowe **przed**
+   uruchomieniem (w Run Configuration → Environment variables, albo
+   `export X_USERNAME=... X_PASSWORD=...` w terminalu przed `streamlit run`).
+
+## Instalacja (tylko CLI, bez GUI)
 
 ```bash
 cd pattern_ml
@@ -18,7 +72,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Użycie
+## Użycie (CLI)
 
 ```bash
 python main.py --ticker AAPL --period 2y --interval 1d --horizon 5
@@ -80,6 +134,12 @@ Parametry:
    stożkiem ceny** (przerywana linia mediany + zacieniowany zakres P10-P90)
    rozciągniętym w przyszłość za ostatnią świecę - niepewność rośnie wraz
    z odległością w czasie (skalowanie `sqrt(t)`).
+8. **`app.py` + `ui/`** — GUI (Streamlit) spinające punkty 1-7 oraz
+   `news_scraper.py`/backtest w jednym interfejsie (patrz sekcja "GUI"
+   wyżej) - `ui/signal_tab.py`, `ui/backtest_tab.py`, `ui/news_tab.py`
+   wołają bezpośrednio te same funkcje z `src/`, którymi posługują się
+   skrypty CLI (`main.py`, `backtest_run.py`, `news_scraper.py`) - jedna
+   logika, dwa sposoby uruchomienia.
 
 ### Purged CV + embargo (poprawka przecieku danych)
 

@@ -42,16 +42,11 @@ def _post_polarity(text: str) -> int:
     return int(np.sign(bull - bear))
 
 
-def load_x_sentiment(json_path: str) -> pd.DataFrame:
-    """Wczytuje plik JSON z news_scraper.py i agreguje wzmianki do dziennych cech:
+def aggregate_x_items(items: list) -> pd.DataFrame:
+    """Agreguje listę postów (format `items` z news_scraper.py) do dziennych cech:
     liczba wzmianek, łączne zaangażowanie, średnia polaryzacja (ważona
-    zaangażowaniem), dzień ostatniej wzmianki."""
-    path = Path(json_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Nie znaleziono pliku z wynikami news_scraper.py: {json_path}")
-
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    items = payload.get("items", [])
+    zaangażowaniem). Działa bezpośrednio na danych w pamięci (np. z GUI),
+    bez potrzeby zapisu/odczytu pliku JSON."""
     if not items:
         return pd.DataFrame(columns=["sent_mentions", "sent_engagement", "sent_polarity"])
 
@@ -63,7 +58,6 @@ def load_x_sentiment(json_path: str) -> pd.DataFrame:
         rows.append({"date": published.normalize(), "engagement": engagement, "polarity": polarity})
 
     posts = pd.DataFrame(rows)
-    weight = posts["engagement"] + 1  # +1 żeby posty bez zaangażowania też liczyły się w średniej
 
     daily = posts.groupby("date").apply(
         lambda g: pd.Series({
@@ -75,6 +69,17 @@ def load_x_sentiment(json_path: str) -> pd.DataFrame:
     )
     daily.index.name = "Date"
     return daily.sort_index()
+
+
+def load_x_sentiment(json_path: str) -> pd.DataFrame:
+    """Wczytuje plik JSON z news_scraper.py i agreguje wzmianki do dziennych cech
+    (patrz `aggregate_x_items`)."""
+    path = Path(json_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Nie znaleziono pliku z wynikami news_scraper.py: {json_path}")
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return aggregate_x_items(payload.get("items", []))
 
 
 def merge_sentiment_features(
