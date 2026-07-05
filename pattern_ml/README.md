@@ -144,7 +144,39 @@ python backtest_run.py --ticker AAPL --period 3y --interval 1d
 Wynik: pełne statystyki w konsoli (Return, Sharpe/Sortino/Calmar, max drawdown,
 win rate, profit factor, liczba transakcji...) oraz interaktywny raport HTML
 (equity curve, drawdown, transakcje na wykresie cenowym) w
-`output/backtest_<TICKER>.html`.
+`output/backtest_<TICKER>_ml.html`.
+
+### Porównanie z prostymi strategiami bazowymi
+
+```bash
+python backtest_run.py --ticker AAPL --period 3y --compare-baselines
+```
+
+Dokłada trzy klasyczne, reguły-oparte strategie (`src/baselines.py`) i drukuje
+tabelę porównawczą (Return, Sharpe, max drawdown, win rate, profit factor,
+liczba transakcji) obok wyniku ML - **jeśli ensemble ML nie bije tych prostych
+reguł, to znak, że jego "przewaga" jest iluzoryczna**, a nie że warto z niego
+korzystać tylko dlatego, że jest bardziej wyrafinowany:
+
+- **`turtle`** — klasyczny Donchian breakout: kup przy wybiciu ponad
+  N-dniowe maksimum, zamknij pozycję przy zejściu poniżej N-dniowego minimum
+  (`--turtle-window`, domyślnie 20).
+- **`sma`** — crossover szybkiej/wolnej średniej kroczącej
+  (`--sma-fast`/`--sma-slow`, domyślnie 10/30).
+- **`contrarian`** — "kup dołek, sprzedaj górkę" z potwierdzeniem opóźnieniem
+  (`--contrarian-delay`, domyślnie 3), żeby uniknąć whipsawów.
+
+Logika tych trzech strategii wzorowana jest na najprostszych (nie-ML, nie-RL)
+agentach z [huseinzol05/Stock-Prediction-Models](https://github.com/huseinzol05/Stock-Prediction-Models)
+(`agent/1.turtle-agent.ipynb`, `2.moving-average-agent.ipynb`,
+`3.signal-rolling-agent.ipynb`) - z jedną poprawką: w oryginale okna liczone są
+jako procent długości całego zbioru danych (np. "10% z len(df)"), co nie ma
+sensu przy różnych okresach/interwałach; tutaj są to stałe, standardowe
+parametry. Reszta tego repozytorium (18 wariantów LSTM/GRU/Transformer, 23
+agentów RL/neuroewolucyjnych) celowo pominięta - większość tamtych przykładów
+raportuje nierealistycznie wysoką skuteczność (np. "95.86% trafności") bez
+walidacji walk-forward, co zwykle oznacza przeciek danych albo trenowanie/test
+na tym samym oknie, a nie faktyczną przewagę predykcyjną.
 
 ### Jak to zbudowano (i dlaczego tak)
 

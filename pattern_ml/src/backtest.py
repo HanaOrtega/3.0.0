@@ -132,6 +132,9 @@ def run_backtest(
             tp_atr_mult=tp_atr_mult,
         ),
     )
-    bt = Backtest(df, strategy_cls, cash=cash, commission=commission, exclusive_orders=True)
+    bt = Backtest(
+        df, strategy_cls, cash=cash, commission=commission,
+        exclusive_orders=True, finalize_trades=True,
+    )
     stats = bt.run()
     return bt, stats
