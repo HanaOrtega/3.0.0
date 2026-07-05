@@ -20,10 +20,10 @@ import numpy as np
 import pandas as pd
 from backtesting import Backtest, Strategy
 
-from .features import build_feature_matrix
+from .features import MAX_INDICATOR_LOOKBACK, build_feature_matrix
 from .model import make_classifier
 
-MIN_WARMUP_BARS = 60  # najdłuższe okno wskaźnika (SMA50) + zapas na NaN z ta-lib
+MIN_WARMUP_BARS = MAX_INDICATOR_LOOKBACK + 10  # najdłuższe okno cechy (fractional diff) + zapas na NaN z ta-lib
 
 
 class MLStrategy(Strategy):
@@ -33,7 +33,7 @@ class MLStrategy(Strategy):
 
     # parametry walk-forward
     retrain_every = 20
-    train_window = 250
+    train_window = 300
 
     # parametry decyzji i zarządzania ryzykiem
     min_confidence = 0.40
@@ -132,7 +132,7 @@ def run_backtest(
     horizon: int = 5,
     atr_mult: float = 0.5,
     retrain_every: int = 20,
-    train_window: int = 250,
+    train_window: int = 300,
     min_confidence: float = 0.40,
     risk_pct: float = 0.01,
     sl_atr_mult: float = 1.5,

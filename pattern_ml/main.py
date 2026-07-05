@@ -19,6 +19,8 @@ Program:
 import argparse
 import sys
 
+import numpy as np
+
 from src.data import fetch_ohlcv
 from src.features import MAX_INDICATOR_LOOKBACK, build_feature_matrix
 from src.model import predict_latest, predict_price_path, train_model, train_quantile_models
@@ -34,6 +36,11 @@ def parse_args():
     p.add_argument("--interval", default="1d", help="Interwał świec, np. 1d, 1h, 1wk")
     p.add_argument("--horizon", type=int, default=5, help="Ile świec do przodu przewiduje model")
     p.add_argument("--atr-mult", type=float, default=0.5, help="Próg klasyfikacji jako wielokrotność ATR%%")
+    p.add_argument(
+        "--min-confidence", type=float, default=None,
+        help="Próg pewności do wyciszenia słabych sygnałów do NEUTRALNY (domyślnie: dobierany "
+        "automatycznie na podstawie walidacji krzyżowej, maksymalizując precyzję sygnałów)",
+    )
     p.add_argument("--last-n", type=int, default=150, help="Ile ostatnich świec pokazać na wykresie")
     p.add_argument("--save", default=None, help="Ścieżka do zapisu wykresu (np. wykres.png)")
     p.add_argument("--no-show", action="store_true", help="Nie otwieraj okna z wykresem (tylko zapis)")
@@ -86,7 +93,18 @@ def main():
     print("Najważniejsze cechy modelu:")
     print(result.feature_importances.head(10).to_string())
 
-    signal, proba, as_of = predict_latest(result, features, feature_cols)
+    if np.isnan(result.recommended_confidence_precision):
+        print("\nZa mało danych walidacyjnych, żeby dobrać próg pewności - używam sygnału bez wyciszania.")
+        min_confidence = args.min_confidence
+    else:
+        print(
+            f"\nZalecany próg pewności (maks. precyzja sygnałów kierunkowych w walidacji): "
+            f"{result.recommended_confidence * 100:.0f}% (szacowana precyzja: "
+            f"{result.recommended_confidence_precision * 100:.0f}%)"
+        )
+        min_confidence = args.min_confidence if args.min_confidence is not None else result.recommended_confidence
+
+    signal, proba, as_of = predict_latest(result, features, feature_cols, min_confidence=min_confidence)
     print(f"\n=== SYGNAŁ na {as_of.date()} dla {args.ticker}: {signal} ===")
     for label, p in proba.items():
         print(f"  {label}: {p * 100:.1f}%")

@@ -39,7 +39,7 @@ def parse_args():
     p.add_argument("--horizon", type=int, default=5, help="Horyzont etykiety/decyzji (świece)")
     p.add_argument("--atr-mult", type=float, default=0.5, help="Próg etykiety jako wielokrotność ATR%%")
     p.add_argument("--retrain-every", type=int, default=20, help="Co ile świec retrenować model")
-    p.add_argument("--train-window", type=int, default=250, help="Rozmiar kroczącego okna treningowego")
+    p.add_argument("--train-window", type=int, default=300, help="Rozmiar kroczącego okna treningowego")
     p.add_argument("--min-confidence", type=float, default=0.40, help="Min. prawdopodobieństwo do wejścia w pozycję")
     p.add_argument("--risk-pct", type=float, default=0.01, help="Ryzyko na transakcję jako ułamek kapitału")
     p.add_argument("--sl-atr-mult", type=float, default=1.5, help="Odległość stop-loss jako wielokrotność ATR")

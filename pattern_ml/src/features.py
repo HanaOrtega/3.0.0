@@ -12,7 +12,7 @@ from .sentiment import merge_sentiment_features
 
 AGGRESSIVE_CLEANING_ROW_THRESHOLD = 200
 AGGRESSIVE_CLEANING_DROP_FRACTION = 0.25
-MAX_INDICATOR_LOOKBACK = 50  # SMA50 - najdłuższe okno spośród cech w build_indicators
+MAX_INDICATOR_LOOKBACK = 100  # okno fractional differencing (_fractional_difference) - najdłuższe spośród cech
 
 
 def build_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -61,6 +61,60 @@ def build_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _fracdiff_weights(d: float, size: int, threshold: float = 1e-4) -> np.ndarray:
+    weights = [1.0]
+    for k in range(1, size):
+        w = -weights[-1] * (d - k + 1) / k
+        if abs(w) < threshold:
+            break
+        weights.append(w)
+    return np.array(weights[::-1])
+
+
+def _fractional_difference(series: pd.Series, d: float = 0.4, threshold: float = 1e-4, max_window: int = 100) -> pd.Series:
+    """Różnicowanie frakcyjne (Lopez de Prado) log-ceny: usuwa trend (stacjonarność
+    potrzebna modelowi drzewiastemu, żeby nie "uczyć się" konkretnego poziomu ceny),
+    ale w przeciwieństwie do zwykłego `pct_change()` zachowuje część pamięci długoterminowej
+    (wagi maleją, ale nie znikają nagle) - stąd bogatszy sygnał niż proste stopy zwrotu."""
+    weights = _fracdiff_weights(d, max_window, threshold)
+    width = len(weights)
+    return series.rolling(width).apply(lambda x: np.dot(weights, x), raw=True)
+
+
+def _hurst_exponent(x: np.ndarray, max_lag: int = 15) -> float:
+    """Szacuje wykładnik Hursta (rozrzut wariancji przyrostów w skali log-log):
+    <0.5 = reżim mean-reverting, ~0.5 = błądzenie losowe, >0.5 = reżim trendujący."""
+    lags = np.arange(2, max_lag)
+    tau = np.array([np.std(x[lag:] - x[:-lag]) for lag in lags])
+    tau = np.where(tau > 1e-8, tau, 1e-8)
+    slope = np.polyfit(np.log(lags), np.log(tau), 1)[0]
+    return float(slope * 2.0)
+
+
+def _rolling_entropy(returns: pd.Series, window: int = 30, bins: int = 8) -> pd.Series:
+    """Entropia Shannona rozkładu zwrotów w oknie - niska = uporządkowany/kierunkowy
+    ruch ceny, wysoka = szum bez wyraźnego kierunku."""
+    def entropy_fn(x):
+        hist, _ = np.histogram(x, bins=bins)
+        probs = hist / hist.sum()
+        probs = probs[probs > 0]
+        return float(-np.sum(probs * np.log(probs)))
+
+    return returns.rolling(window).apply(entropy_fn, raw=True)
+
+
+def _regime_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Cechy opisujące "reżim" rynku (trend/mean-reversion/szum), wzorowane na
+    feature_enrichment.py (fractional differencing) i custom_features.py
+    (wykładnik Hursta, entropia) z projektu JuggleLab."""
+    out = pd.DataFrame(index=df.index)
+    log_close = np.log(df["Close"])
+    out["frac_diff_close"] = _fractional_difference(log_close)
+    out["hurst"] = log_close.rolling(40).apply(_hurst_exponent, raw=True)
+    out["return_entropy"] = _rolling_entropy(df["Close"].pct_change(), window=20)
+    return out
+
+
 def _candle_shape_features(df: pd.DataFrame) -> pd.DataFrame:
     """Cechy ciągłe opisujące kształt świecy (silniejszy sygnał dla ML niż same flagi formacji)."""
     rng = (df["High"] - df["Low"]).replace(0, np.nan)
@@ -102,8 +156,9 @@ def build_feature_matrix(
     ind = build_indicators(df)
     pat = detect_all(df)
     shape = _candle_shape_features(df)
+    regime = _regime_features(df)
 
-    features = pd.concat([ind, pat.drop(columns=["pattern_signal"]), shape], axis=1)
+    features = pd.concat([ind, pat.drop(columns=["pattern_signal"]), shape, regime], axis=1)
     features["pattern_signal"] = pat["pattern_signal"]
 
     # cechy relatywne (bardziej stabilne dla ML niż ceny bezwzględne)
@@ -135,6 +190,7 @@ def build_feature_matrix(
         "close_vs_sma20", "close_vs_sma50", "sma20_vs_sma50", "ema_cross",
         "return_1", "return_5", "return_10", "volatility_10",
         "body_pct", "upper_shadow_pct", "lower_shadow_pct", "candle_direction",
+        "frac_diff_close", "hurst", "return_entropy",
         "pattern_signal",
     ] + list(pat.drop(columns=["pattern_signal"]).columns)
 

@@ -50,7 +50,7 @@ def render():
 
         col7, col8, col9 = st.columns(3)
         retrain_every = col7.number_input("Retrenuj co (świec)", min_value=5, max_value=100, value=20, key="bt_retrain_every")
-        train_window = col8.number_input("Okno treningowe (świec)", min_value=60, max_value=1000, value=250, key="bt_train_window")
+        train_window = col8.number_input("Okno treningowe (świec)", min_value=120, max_value=1000, value=300, key="bt_train_window")
         risk_pct = col9.number_input("Ryzyko na transakcję", min_value=0.001, max_value=0.10, value=0.01, step=0.001, format="%.3f", key="bt_risk_pct")
 
         col10, col11, col12 = st.columns(3)

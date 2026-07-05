@@ -90,6 +90,7 @@ Parametry:
 | `--interval` | Interwał świec (`1d`, `1h`, `1wk`...) | `1d` |
 | `--horizon` | Liczba świec do przodu, dla której model przewiduje kierunek | `5` |
 | `--atr-mult` | Próg (jako wielokrotność ATR%) odróżniający ruch od szumu rynkowego | `0.5` |
+| `--min-confidence` | Próg pewności do wyciszenia słabych sygnałów do NEUTRALNY | auto (dobierany z CV) |
 | `--last-n` | Liczba ostatnich świec pokazywanych na wykresie | `150` |
 | `--save` | Ścieżka zapisu wykresu jako PNG | brak |
 | `--no-show` | Nie otwieraj interaktywnego okna (przydatne np. przy `--save`) | wyłączone |
@@ -110,12 +111,14 @@ Parametry:
    wieczorna, trzej biali żołnierze/trzy czarne kruki, linia przebicia, zasłona
    ciemnej chmury) i buduje z nich skumulowany sygnał kierunkowy.
 4. **`src/features.py`** — liczy wskaźniki analizy technicznej (SMA, EMA, RSI,
-   MACD, Stochastic, Bollinger Bands, ATR, ADX, wolumen) i łączy je z formacjami
-   świecowymi (+ opcjonalnie sentymentem z X) w macierz cech dla modelu.
-   Etykieta to kierunek ceny za `horizon` świec względem progu opartego o ATR
-   (żeby odfiltrować szum). Wskaźniki nigdy nie są sztucznie uzupełniane
-   (ffill/bfill) - wiersze z brakującymi danymi są odrzucane, z ostrzeżeniem,
-   gdy to oznacza utratę dużej części małego zbioru.
+   MACD, Stochastic, Bollinger Bands, ATR, ADX, wolumen), kształt świecy oraz
+   **cechy reżimu rynku** (fractional differencing log-ceny, wykładnik Hursta,
+   entropia zwrotów - patrz niżej) i łączy je z formacjami świecowymi (+
+   opcjonalnie sentymentem z X) w macierz cech dla modelu. Etykieta to kierunek
+   ceny za `horizon` świec względem progu opartego o ATR (żeby odfiltrować
+   szum). Wskaźniki nigdy nie są sztucznie uzupełniane (ffill/bfill) - wiersze
+   z brakującymi danymi są odrzucane, z ostrzeżeniem, gdy to oznacza utratę
+   dużej części małego zbioru.
 5. **`src/sentiment.py`** — wczytuje wynik `news_scraper.py` i agreguje świeże
    wzmianki z X do dziennych cech (liczba wzmianek, zaangażowanie, prosta
    polaryzacja leksykonowa, dni od ostatniej wzmianki), dołączanych do macierzy
@@ -124,10 +127,12 @@ Parametry:
    `RandomForestClassifier` z `HistGradientBoostingClassifier` przez meta-model
    `LogisticRegression`, z walidacją krzyżową szeregu czasowego typu
    purged+embargo (bez przecieku danych z przyszłości - patrz niżej); zwraca
-   prognozę (LONG/SHORT/NEUTRALNY) wraz z prawdopodobieństwami. Dodatkowo
-   trenuje trzy regresory kwantylowe (`HistGradientBoostingRegressor`,
-   percentyle 10/50/90) przewidujące przyszłą stopę zwrotu - to one napędzają
-   stożek prognozy ceny na wykresie.
+   prognozę (LONG/SHORT/NEUTRALNY) wraz z prawdopodobieństwami oraz
+   **automatycznie dobrany próg pewności** maksymalizujący precyzję sygnałów
+   kierunkowych (patrz niżej - "Adaptacyjny próg pewności"). Dodatkowo trenuje
+   trzy regresory kwantylowe (`HistGradientBoostingRegressor`, percentyle
+   10/50/90) przewidujące przyszłą stopę zwrotu - to one napędzają stożek
+   prognozy ceny na wykresie.
 7. **`src/plotting.py`** — rysuje wykres świecowy (`mplfinance`) z SMA/Bollinger,
    panelami RSI i MACD, wolumenem, znacznikami formacji (▲ bycze / ▼ niedźwiedzie),
    ramką z sygnałem ML i strzałką kierunku transakcji, a także **prognozowanym
@@ -146,11 +151,49 @@ Parametry:
 Etykieta każdej próbki zależy od ceny `horizon` świec w przyszłość, więc zwykły
 `TimeSeriesSplit` bez przerwy przecieka dane na granicy train/test. `gap=horizon`
 usuwa ten podstawowy przeciek, ale nasze cechy mają też dłuższe "okno pamięci"
-niż `horizon` (np. SMA50 vs domyślny `horizon=5`) - dlatego `src/model.py`
-dokłada dodatkowo **embargo** (`MAX_INDICATOR_LOOKBACK=50` próbek odciętych z
-końca train foldu) oraz dobiera liczbę foldów adaptacyjnie do rozmiaru danych
-(`choose_n_splits`), zamiast sztywnego podziału, który przy krótkiej historii
-mógłby dać foldy zbyt małe do sensownego treningu/oceny.
+niż `horizon` (np. okno fractional differencing, patrz niżej, vs domyślny
+`horizon=5`) - dlatego `src/model.py` dokłada dodatkowo **embargo**
+(`MAX_INDICATOR_LOOKBACK=100` próbek odciętych z końca train foldu) oraz
+dobiera liczbę foldów adaptacyjnie do rozmiaru danych (`choose_n_splits`),
+zamiast sztywnego podziału, który przy krótkiej historii mógłby dać foldy
+zbyt małe do sensownego treningu/oceny.
+
+### Cechy reżimu rynku (fractional differencing, Hurst, entropia)
+
+Trzy dodatkowe cechy w `src/features.py::_regime_features`, wzorowane na
+`data/preprocessing_modules/feature_enrichment.py` (fractional differencing)
+i `custom_features.py` (Hurst, entropia) z JuggleLab - dają modelowi surowiec
+do rozróżnienia reżimu rynku, którego SMA/RSI/MACD same nie oddają:
+
+- **`frac_diff_close`** - różnicowanie frakcyjne (Lopez de Prado) log-ceny:
+  usuwa trend (potrzebne modelowi drzewiastemu, żeby nie "uczyć się" wprost
+  poziomu ceny), ale w przeciwieństwie do zwykłych stóp zwrotu zachowuje część
+  pamięci długoterminowej zamiast wyzerowywać ją przy każdym różnicowaniu.
+- **`hurst`** - przybliżony wykładnik Hursta (skala log-log wariancji
+  przyrostów): `<0.5` sugeruje reżim mean-reverting, `~0.5` błądzenie losowe,
+  `>0.5` reżim trendujący. To uproszczony estymator (nie pełna analiza R/S) -
+  bywa zaszumiony na krótkich oknach, ale jako cecha wejściowa dla modelu
+  drzewiastego nie musi być idealnie skalibrowany, żeby nieść informację.
+  Wydłuża wymaganą "rozgrzewkę" danych do ok. 100 świec.
+- **`return_entropy`** - entropia Shannona rozkładu zwrotów w 20-świecowym
+  oknie: niska = uporządkowany/kierunkowy ruch, wysoka = szum bez wyraźnego
+  kierunku.
+
+### Adaptacyjny próg pewności (minimalizacja strat na fałszywych sygnałach)
+
+Zamiast zawsze podawać klasę o najwyższym prawdopodobieństwie (nawet gdy to
+36% kontra 34% kontra 30% - ledwo różni się od zgadywania), `train_model`
+dobiera próg pewności `recommended_confidence`, poniżej którego sygnał jest
+wyciszany do NEUTRALNY. Próg jest dobierany na zbiorczych (pooled) out-of-fold
+predykcjach ze wszystkich foldów walidacji krzyżowej, maksymalizując **precyzję
+sygnałów kierunkowych (LONG/SHORT)**, nie ogólną trafność/F1 - inspirowane
+`classification_thresholds.py` z JuggleLab, ale z celem dopasowanym do tego
+projektu: skoro priorytetem jest "tracić jak najmniej", liczy się jakość
+transakcji, na które model się faktycznie decyduje, a nie łapanie każdej
+możliwej okazji. Próg ma wbudowany próg minimalnej "częstości sygnału"
+(`min_signal_rate`), żeby nie wybrać progu tak wysokiego, że model nigdy nic
+nie sygnalizuje. W `main.py` i GUI próg stosowany jest domyślnie automatycznie
+(można go nadpisać ręcznie: `--min-confidence` / suwak w GUI).
 
 ## Świeże wzmianki o instrumencie z X (Twitter)
 
@@ -307,8 +350,11 @@ ograniczeń do końca backtestu.
 
 Retrenowanie ensemble (RandomForest + HistGradientBoosting) co `--retrain-every`
 świec jest kosztowne obliczeniowo - backtest na kilkuset świecach może potrwać
-od kilkudziesięciu sekund do kilku minut. Zwiększ `--retrain-every` lub zmniejsz
-`--train-window`, żeby przyspieszyć kosztem rzadszej aktualizacji modelu.
+od kilkudziesięciu sekund do kilku minut. Domyślny `--train-window` podniesiono
+z 250 do 300 świec, żeby po nowej ~100-świecowej "rozgrzewce" cech reżimu rynku
+(fractional differencing) nadal zostawało wystarczająco dużo próbek do treningu.
+Zwiększ `--retrain-every` lub zmniejsz `--train-window`, żeby przyspieszyć
+kosztem rzadszej aktualizacji modelu / mniejszej liczby dostępnych cech.
 
 ## Co zaczerpnięto z JuggleLab (i co celowo pominięto)
 
@@ -335,6 +381,13 @@ uproszczone, tanie w utrzymaniu wersje kilku pomysłów:
   `pipeline/pnl_simulation/simulator.py`.
 - **Pre-flight bramka jakości danych** (`src/quality.py`) - uproszczona wersja
   twardych sprawdzeń z `cv_requirements.py`/`cross_validation_validation.py`.
+- **Cechy reżimu rynku** (`src/features.py::_regime_features`) - fractional
+  differencing wzorem `feature_enrichment.py`, wykładnik Hursta i entropia
+  zwrotów wzorem `custom_features.py`.
+- **Adaptacyjny próg pewności** (`src/model.py::_tune_confidence_threshold`) -
+  inspirowane `classification_thresholds.py`, ale z celem dopasowanym do tego
+  projektu: maksymalizacja precyzji sygnałów kierunkowych (minimalizacja
+  strat), nie ogólnego F1.
 
 Celowo pominięto: Temporal Fusion Transformer (`models/tft.py`) - deep learning
 nieprzystający do sklearnowego ensemble; własny parser YAML i 3-warstwowy

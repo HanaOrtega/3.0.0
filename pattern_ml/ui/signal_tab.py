@@ -1,5 +1,6 @@
 """Zakładka GUI: sygnał ML (formacje świecowe + analiza techniczna + prognoza)."""
 
+import numpy as np
 import streamlit as st
 
 from src.features import MAX_INDICATOR_LOOKBACK, build_feature_matrix
@@ -22,6 +23,14 @@ def render():
     horizon = col4.number_input("Horyzont (świece)", min_value=1, max_value=60, value=5, key="signal_horizon")
     atr_mult = col5.number_input("Próg ATR (atr_mult)", min_value=0.1, max_value=3.0, value=0.5, step=0.1, key="signal_atr_mult")
     last_n = col6.slider("Świec na wykresie", min_value=50, max_value=400, value=150, key="signal_last_n")
+
+    auto_confidence = st.checkbox(
+        "Automatyczny próg pewności (maksymalizuje precyzję sygnałów, nie ogólną trafność)",
+        value=True, key="signal_auto_conf",
+    )
+    manual_confidence = None
+    if not auto_confidence:
+        manual_confidence = st.slider("Ręczny próg pewności", min_value=0.34, max_value=0.90, value=0.40, step=0.01, key="signal_manual_conf")
 
     use_sentiment = False
     if st.session_state.get("sentiment_df") is not None:
@@ -61,7 +70,15 @@ def render():
             st.warning(f"Tylko {len(X)} próbek treningowych - rozważ dłuższy okres danych.")
 
         result = train_model(X, y, gap=horizon, embargo=MAX_INDICATOR_LOOKBACK)
-        signal, proba, as_of = predict_latest(result, features, feature_cols)
+
+        if manual_confidence is not None:
+            min_confidence = manual_confidence
+        elif not np.isnan(result.recommended_confidence_precision):
+            min_confidence = result.recommended_confidence
+        else:
+            min_confidence = None
+
+        signal, proba, as_of = predict_latest(result, features, feature_cols, min_confidence=min_confidence)
 
         quantile_models = train_quantile_models(X, y_reg)
         last_close = float(df["Close"].iloc[-1])
@@ -84,6 +101,14 @@ def render():
     st.pyplot(fig, clear_figure=True)
 
     with st.expander("Szczegóły modelu (walidacja krzyżowa, ważność cech)"):
-        st.metric("Trafność CV (walidacja krzyżowa szeregu czasowego)", f"{result.cv_accuracy * 100:.1f}%")
+        col_d, col_e = st.columns(2)
+        col_d.metric("Trafność CV (walidacja krzyżowa szeregu czasowego)", f"{result.cv_accuracy * 100:.1f}%")
+        if not np.isnan(result.recommended_confidence_precision):
+            col_e.metric(
+                "Zalecany próg pewności (precyzja sygnałów)",
+                f"{result.recommended_confidence * 100:.0f}%",
+                help=f"Szacowana precyzja sygnałów kierunkowych przy tym progu: "
+                     f"{result.recommended_confidence_precision * 100:.0f}% (na danych walidacyjnych)",
+            )
         st.text(result.report)
         st.bar_chart(result.feature_importances.head(10))

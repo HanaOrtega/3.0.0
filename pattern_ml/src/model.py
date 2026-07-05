@@ -90,12 +90,54 @@ def purged_splits(n_samples: int, n_splits: int, gap: int = 0, embargo: int = 0)
         yield train_idx, test_idx
 
 
+DEFAULT_CONFIDENCE_GRID = np.arange(0.36, 0.76, 0.02)
+
+
+def _tune_confidence_threshold(
+    records: np.ndarray, thresholds=DEFAULT_CONFIDENCE_GRID, min_signal_rate: float = 0.05
+):
+    """Dobiera próg pewności maksymalizujący PRECYZJĘ sygnałów kierunkowych
+    (LONG/SHORT), nie ogólną trafność (accuracy/F1) - bo celem jest ograniczenie
+    strat na fałszywych sygnałach, a nie łapanie każdej okazji. Model może więc
+    świadomie "milczeć" (NEUTRALNY) częściej, jeśli to podnosi jakość tych
+    sygnałów, na które się faktycznie decyduje.
+
+    `records`: tablica (n, 3) kolumn (pewność, klasa_przewidziana, klasa_prawdziwa)
+    zebrana z out-of-fold predykcji walidacji krzyżowej. `min_signal_rate` to
+    minimalny odsetek próbek, na które próg wciąż musi dawać sygnał kierunkowy -
+    zabezpiecza przed wybraniem progu tak wysokiego, że model nigdy nic nie
+    sygnalizuje (0 sygnałów = niezdefiniowana/myląco "idealna" precyzja).
+    """
+    if len(records) == 0:
+        return 0.5, float("nan")
+
+    conf, pred, true = records[:, 0], records[:, 1], records[:, 2]
+    n = len(records)
+    best_tau, best_precision = float(thresholds[0]), -1.0
+
+    for tau in thresholds:
+        mask = (conf >= tau) & (pred != 0)
+        count = mask.sum()
+        if count < max(5, min_signal_rate * n):
+            continue
+        precision = (pred[mask] == true[mask]).mean()
+        if precision > best_precision:
+            best_precision = precision
+            best_tau = float(tau)
+
+    if best_precision < 0:
+        return 0.5, float("nan")
+    return best_tau, float(best_precision)
+
+
 @dataclass
 class TrainResult:
     model: StackingClassifier
     report: str
     feature_importances: pd.Series
     cv_accuracy: float
+    recommended_confidence: float
+    recommended_confidence_precision: float
 
 
 def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, embargo: int = 0) -> TrainResult:
@@ -105,11 +147,17 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, 
     `gap` pomija próbki między train a test foldem odpowiadające horyzontowi
     etykiety; `embargo` dokłada dodatkowy bufor na końcu train foldu, żeby
     długoterminowe wskaźniki (np. SMA50) też nie "widziały" fragmentu test foldu.
+
+    Dodatkowo, na podstawie zbiorczych (pooled) out-of-fold predykcji ze
+    wszystkich foldów, dobiera próg pewności maksymalizujący precyzję sygnałów
+    kierunkowych (patrz `_tune_confidence_threshold`) - zwracany jako
+    `recommended_confidence` w wyniku.
     """
     n_splits = min(n_splits, choose_n_splits(len(X)))
 
     accuracies = []
     last_pred, last_true = None, None
+    oof_records = []
     for train_idx, test_idx in purged_splits(len(X), n_splits, gap=gap, embargo=embargo):
         if len(train_idx) < MIN_TRAIN_FOLD // 2 or len(test_idx) == 0:
             continue
@@ -119,10 +167,21 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, 
         accuracies.append((pred == y.iloc[test_idx].values).mean())
         last_pred, last_true = pred, y.iloc[test_idx]
 
+        proba = clf.predict_proba(X.iloc[test_idx])
+        classes = clf.classes_
+        idx = np.argmax(proba, axis=1)
+        conf = proba[np.arange(len(idx)), idx]
+        fold_pred = classes[idx]
+        true_vals = y.iloc[test_idx].values
+        oof_records.append(np.column_stack([conf, fold_pred, true_vals]))
+
     report = classification_report(
         last_true, last_pred, labels=[-1, 0, 1],
         target_names=["SHORT", "NEUTRALNY", "LONG"], zero_division=0,
     ) if last_true is not None else "Za mało danych na sensowną walidację krzyżową."
+
+    records = np.concatenate(oof_records) if oof_records else np.empty((0, 3))
+    recommended_confidence, recommended_precision = _tune_confidence_threshold(records)
 
     # finalny model trenowany na wszystkich dostępnych danych historycznych
     final_model = make_classifier()
@@ -137,17 +196,32 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, 
         report=report,
         feature_importances=rf_importances,
         cv_accuracy=float(np.mean(accuracies)) if accuracies else float("nan"),
+        recommended_confidence=recommended_confidence,
+        recommended_confidence_precision=recommended_precision,
     )
 
 
-def predict_latest(result: TrainResult, features: pd.DataFrame, feature_cols: list):
-    """Zwraca (etykieta_tekstowa, prawdopodobienstwa_dict) dla najnowszej dostępnej świecy."""
+def predict_latest(result: TrainResult, features: pd.DataFrame, feature_cols: list, min_confidence: float | None = None):
+    """Zwraca (etykieta_tekstowa, prawdopodobienstwa_dict) dla najnowszej dostępnej świecy.
+
+    `min_confidence`: jeśli podany (np. `result.recommended_confidence`) i
+    prawdopodobieństwo najlepszej klasy jest poniżej progu, sygnał jest
+    "wyciszany" do NEUTRALNY - model świadomie milczy zamiast dawać słaby,
+    nisko-pewny sygnał kierunkowy. `proba` w zwrotce zawsze pokazuje surowe
+    prawdopodobieństwa modelu, niezależnie od wyciszenia.
+    """
     latest = features.dropna(subset=feature_cols).iloc[[-1]]
     X_latest = latest[feature_cols].astype(float)
 
-    pred = result.model.predict(X_latest)[0]
     proba = result.model.predict_proba(X_latest)[0]
-    proba_dict = {LABELS[c]: float(p) for c, p in zip(result.model.classes_, proba)}
+    classes = result.model.classes_
+    idx = int(np.argmax(proba))
+    pred = classes[idx]
+    confidence = proba[idx]
+    proba_dict = {LABELS[c]: float(p) for c, p in zip(classes, proba)}
+
+    if min_confidence is not None and pred != 0 and confidence < min_confidence:
+        pred = 0
 
     return LABELS[pred], proba_dict, latest.index[-1]
 
