@@ -61,9 +61,67 @@ Parametry:
    rozciągniętym w przyszłość za ostatnią świecę - niepewność rośnie wraz
    z odległością w czasie (skalowanie `sqrt(t)`).
 
+## Świeże wzmianki o instrumencie z X (Twitter)
+
+`news_scraper.py` loguje się do X (Playwright) i zbiera **wyłącznie świeże**
+(domyślnie do 24h - `--hours`) posty wzmiankujące dany instrument, z zakładki
+"Najnowsze" (nie "Najlepsze", żeby uniknąć starych, popularnych postów). Wynik
+zapisywany jest do pliku JSON, jako uzupełniający sygnał sentymentu/newsflow
+obok analizy technicznej z `main.py`.
+
+### Instalacja
+
+```bash
+cd pattern_ml
+source .venv/bin/activate
+pip install -r requirements-news.txt
+```
+
+### Dane logowania
+
+Skrypt **nigdy** nie przechowuje hasła w kodzie/repo - pobiera je wyłącznie
+ze zmiennych środowiskowych:
+
+```bash
+export X_USERNAME="twój_login_lub_email"
+export X_PASSWORD="twoje_hasło"
+```
+
+Po pierwszym udanym logowaniu sesja (cookies) zapisywana jest lokalnie w
+`pattern_ml/.auth/x_state.json` (w `.gitignore`, nigdy nie trafia do repo) i
+jest reużywana w kolejnych uruchomieniach, żeby nie logować się za każdym
+razem - X często wymaga dodatkowej weryfikacji (captcha/SMS) przy logowaniu
+z nowego adresu IP/kontenera. Jeśli logowanie automatyczne zostanie
+zablokowane taką weryfikacją, zaloguj się raz ręcznie w zwykłej przeglądarce,
+wyeksportuj sesję Playwright (`storage_state`) i podmień nią plik
+`.auth/x_state.json`.
+
+### Użycie
+
+```bash
+python news_scraper.py --ticker AAPL --company "Apple Inc" --hours 24
+```
+
+| Flaga | Opis | Domyślnie |
+|---|---|---|
+| `--ticker` | Symbol giełdowy (wymagane) | - |
+| `--company` | Pełna nazwa spółki (poprawia trafność wyszukiwania) | brak |
+| `--accounts` | Konta finansowe/newsowe monitorowane pod kątem tickera (bez `@`, po przecinku) | `DeItaone,unusual_whales,FirstSquawk,Reuters,business` |
+| `--hours` | Maksymalny wiek posta w godzinach (filtr świeżości) | `24` |
+| `--max-scrolls` | Ile razy doładować wyniki wyszukiwania (więcej = więcej postów, wolniej) | `5` |
+| `--out` | Katalog zapisu pliku JSON | `output` |
+| `--headed` | Uruchom przeglądarkę widocznie (debugowanie logowania) | wyłączone |
+
+Wynik: `output/news_<TICKER>_<timestamp>.json` z listą postów (autor, treść,
+URL, dokładny czas publikacji, liczba polubień/podań dalej/odpowiedzi) -
+tylko z okna czasowego `--hours`, bez danych archiwalnych.
+
 ## Uwaga
 
 To narzędzie edukacyjne/analityczne, nie system automatycznego handlu.
 Skuteczność modelu (raport `classification_report` i dokładność CV) zawsze
 warto sprawdzić przed podjęciem jakiejkolwiek decyzji inwestycyjnej — rynki
 finansowe są w dużej mierze losowe i żaden model nie daje gwarancji.
+Automatyczne logowanie/scrapowanie X podlega regulaminowi platformy (X Terms
+of Service) - używaj tego narzędzia na własnym koncie, w rozsądnych odstępach
+czasu i wyłącznie do własnych celów analitycznych.
