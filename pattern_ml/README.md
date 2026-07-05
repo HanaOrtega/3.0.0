@@ -116,6 +116,66 @@ Wynik: `output/news_<TICKER>_<timestamp>.json` z listą postów (autor, treść,
 URL, dokładny czas publikacji, liczba polubień/podań dalej/odpowiedzi) -
 tylko z okna czasowego `--hours`, bez danych archiwalnych.
 
+## Backtesting (walk-forward)
+
+`backtest_run.py` sprawdza, czy sygnał ML faktycznie sprawdzałby się w praktyce -
+symuluje handel na danych historycznych z realistyczną egzekucją (prowizje,
+stop-loss/take-profit oparte o ATR, wielkość pozycji oparta o ryzyko na
+transakcję) i liczy pełne statystyki strategii.
+
+```bash
+python backtest_run.py --ticker AAPL --period 3y --interval 1d
+```
+
+| Flaga | Opis | Domyślnie |
+|---|---|---|
+| `--ticker` / `--period` / `--interval` | Jak w `main.py` | `AAPL` / `3y` / `1d` |
+| `--horizon` | Horyzont etykiety/decyzji w świecach | `5` |
+| `--atr-mult` | Próg etykiety jako wielokrotność ATR% | `0.5` |
+| `--retrain-every` | Co ile świec retrenować model | `20` |
+| `--train-window` | Rozmiar kroczącego okna treningowego | `250` |
+| `--min-confidence` | Min. prawdopodobieństwo klasy, żeby wejść w pozycję | `0.40` |
+| `--risk-pct` | Ryzyko na transakcję jako ułamek kapitału | `0.01` |
+| `--sl-atr-mult` / `--tp-atr-mult` | Odległość stop-loss / take-profit jako wielokrotność ATR | `1.5` / `2.5` |
+| `--cash` | Kapitał początkowy | `10000` |
+| `--commission` | Prowizja jako ułamek wartości transakcji | `0.0007` |
+| `--out` | Katalog zapisu interaktywnego raportu HTML | `output` |
+
+Wynik: pełne statystyki w konsoli (Return, Sharpe/Sortino/Calmar, max drawdown,
+win rate, profit factor, liczba transakcji...) oraz interaktywny raport HTML
+(equity curve, drawdown, transakcje na wykresie cenowym) w
+`output/backtest_<TICKER>.html`.
+
+### Jak to zbudowano (i dlaczego tak)
+
+Silnik egzekucji zleceń i wzory na wszystkie metryki pochodzą z biblioteki
+[`backtesting.py`](https://github.com/kernc/backtesting.py) (kernc/backtesting.py)
+zamiast własnej, podatnej na błędy implementacji - to dojrzałe, szeroko używane
+narzędzie w społeczności quant/Python. Wzorzec retrenowania modelu co N świec na
+kroczącym oknie wewnątrz `Strategy.next()` odtwarza
+[oficjalny przykład tej biblioteki "Trading with Machine Learning"](https://github.com/kernc/backtesting.py/blob/master/doc/examples/Trading%20with%20Machine%20Learning.py).
+
+Kluczowa poprawka wzięta z literatury o walidacji modeli ML w finansach (koncepcja
+*purgingu* z prac Marcosa Lópeza de Prado, *"Advances in Financial Machine
+Learning"*): skoro etykieta każdej próbki zależy od ceny `horizon` świec w
+przyszłość, to zwykły podział train/test bez przerwy powoduje przeciek danych na
+granicy - ostatnie próbki treningowe "widzą" fragment okna testowego. Naprawiono
+to na dwóch poziomach:
+- w backteście: model w każdym momencie widzi tylko dane obcięte do bieżącej
+  świecy (`self.data.df` w `backtesting.py` jest już tak obcięte), a
+  `build_feature_matrix` samo odrzuca ostatnie `horizon` wierszy (brak jeszcze
+  znanej etykiety);
+- w treningu na żywo (`main.py` / `src/model.py`): `TimeSeriesSplit` dostał
+  parametr `gap=horizon`, więc walidacja krzyżowa też pomija ten sam bufor
+  między foldami.
+
+### Uwaga o czasie działania
+
+Retrenowanie ensemble (RandomForest + HistGradientBoosting) co `--retrain-every`
+świec jest kosztowne obliczeniowo - backtest na kilkuset świecach może potrwać
+od kilkudziesięciu sekund do kilku minut. Zwiększ `--retrain-every` lub zmniejsz
+`--train-window`, żeby przyspieszyć kosztem rzadszej aktualizacji modelu.
+
 ## Uwaga
 
 To narzędzie edukacyjne/analityczne, nie system automatycznego handlu.

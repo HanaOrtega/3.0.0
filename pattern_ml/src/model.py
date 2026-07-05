@@ -24,7 +24,7 @@ LABELS = {1: "LONG", -1: "SHORT", 0: "NEUTRALNY"}
 QUANTILES = (0.1, 0.5, 0.9)
 
 
-def _make_classifier() -> VotingClassifier:
+def make_classifier() -> VotingClassifier:
     rf = RandomForestClassifier(
         n_estimators=300,
         max_depth=6,
@@ -52,15 +52,21 @@ class TrainResult:
     cv_accuracy: float
 
 
-def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5) -> TrainResult:
+def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0) -> TrainResult:
     """Trenuje ensemble RF + HistGradientBoosting z walidacją krzyżową szeregu
-    czasowego (bez przecieku danych z przyszłości)."""
-    tscv = TimeSeriesSplit(n_splits=min(n_splits, max(2, len(X) // 50)))
+    czasowego (bez przecieku danych z przyszłości).
+
+    `gap` (tzw. purging) pomija `gap` próbek między train a test foldem - istotne
+    bo etykieta każdej próbki zależy od ceny `horizon` świec w przód, więc bez
+    tej przerwy ostatnie próbki treningowe "widziałyby" fragment danych z okna
+    testowego (przeciek informacji z przyszłości na granicy foldów).
+    """
+    tscv = TimeSeriesSplit(n_splits=min(n_splits, max(2, len(X) // 50)), gap=gap)
 
     accuracies = []
     last_pred, last_true = None, None
     for train_idx, test_idx in tscv.split(X):
-        clf = _make_classifier()
+        clf = make_classifier()
         clf.fit(X.iloc[train_idx], y.iloc[train_idx])
         pred = clf.predict(X.iloc[test_idx])
         accuracies.append((pred == y.iloc[test_idx].values).mean())
@@ -72,7 +78,7 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5) -> TrainResult
     )
 
     # finalny model trenowany na wszystkich dostępnych danych historycznych
-    final_model = _make_classifier()
+    final_model = make_classifier()
     final_model.fit(X, y)
 
     rf_importances = pd.Series(

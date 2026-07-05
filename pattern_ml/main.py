@@ -57,7 +57,7 @@ def main():
 
     print(f"Trenowanie modelu ML (RandomForest + HistGradientBoosting) na {len(X)} próbkach "
           f"(horyzont = {args.horizon} świec)...")
-    result = train_model(X, y)
+    result = train_model(X, y, gap=args.horizon)
 
     print(f"\nŚrednia trafność (walidacja krzyżowa szeregu czasowego): {result.cv_accuracy * 100:.1f}%")
     print("\nRaport klasyfikacji (ostatni fold walidacyjny):")
