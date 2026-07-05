@@ -8,8 +8,10 @@ Program:
   1. Pobiera dane OHLCV z yfinance.
   2. Liczy wskaźniki analizy technicznej (SMA, EMA, RSI, MACD, Bollinger, ATR, ADX...).
   3. Wykrywa klasyczne formacje świecowe (młot, objęcie bessy/hossy, gwiazda poranna itd.).
-  4. Trenuje model ML (RandomForest) przewidujący kierunek ceny za `horizon` świec.
-  5. Rysuje wykres świecowy ze wskaźnikami, formacjami i sygnałem ML (LONG/SHORT/NEUTRALNY).
+  4. Trenuje ensemble ML (RandomForest + HistGradientBoosting) przewidujący kierunek
+     ceny za `horizon` świec, oraz regresory kwantylowe do prognozy ścieżki ceny.
+  5. Rysuje wykres świecowy ze wskaźnikami, formacjami, sygnałem ML (LONG/SHORT/
+     NEUTRALNY) oraz stożkiem prognozy ceny rozciągniętym w przyszłość.
 """
 
 import argparse
@@ -17,7 +19,7 @@ import sys
 
 from src.data import fetch_ohlcv
 from src.features import build_feature_matrix
-from src.model import predict_latest, train_model
+from src.model import predict_latest, predict_price_path, train_model, train_quantile_models
 from src.plotting import plot_chart
 
 
@@ -42,7 +44,7 @@ def main():
     print(f"Pobrano {len(df)} świec: {df.index[0].date()} -> {df.index[-1].date()}")
 
     print("Liczenie wskaźników technicznych i formacji świecowych...")
-    features, pat, X, y, feature_cols = build_feature_matrix(
+    features, pat, X, y, y_reg, feature_cols = build_feature_matrix(
         df, horizon=args.horizon, atr_mult=args.atr_mult
     )
 
@@ -53,7 +55,8 @@ def main():
             file=sys.stderr,
         )
 
-    print(f"Trenowanie modelu ML na {len(X)} próbkach (horyzont = {args.horizon} świec)...")
+    print(f"Trenowanie modelu ML (RandomForest + HistGradientBoosting) na {len(X)} próbkach "
+          f"(horyzont = {args.horizon} świec)...")
     result = train_model(X, y)
 
     print(f"\nŚrednia trafność (walidacja krzyżowa szeregu czasowego): {result.cv_accuracy * 100:.1f}%")
@@ -67,9 +70,20 @@ def main():
     for label, p in proba.items():
         print(f"  {label}: {p * 100:.1f}%")
 
+    print("\nTrenowanie regresorów kwantylowych (prognoza ścieżki ceny)...")
+    quantile_models = train_quantile_models(X, y_reg)
+    last_close = float(df["Close"].iloc[-1])
+    quantile_prices = predict_price_path(quantile_models, features, feature_cols, last_close)
+    print(
+        f"Prognoza ceny za {args.horizon} świec: "
+        f"{quantile_prices[0.1]:.2f} (P10) — {quantile_prices[0.5]:.2f} (mediana) — "
+        f"{quantile_prices[0.9]:.2f} (P90), obecna cena: {last_close:.2f}"
+    )
+
     print("\nGenerowanie wykresu...")
     fig = plot_chart(
         df, features, pat, args.ticker, signal, proba,
+        quantile_prices=quantile_prices, horizon=args.horizon,
         last_n=args.last_n, save_path=args.save,
     )
 

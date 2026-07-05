@@ -1,10 +1,12 @@
 # Rozpoznawanie formacji świecowych z ML + analiza techniczna
 
 Program pobiera dane rynkowe z **yfinance**, liczy wskaźniki analizy technicznej,
-wykrywa klasyczne formacje świecowe, a następnie trenuje model ML (RandomForest),
-który przewiduje kierunek ceny w najbliższych świecach. Wszystko trafia na jeden
-wykres, na którym widać formacje, wskaźniki oraz sugerowany kierunek transakcji
-(**LONG / SHORT / NEUTRALNY**).
+wykrywa klasyczne formacje świecowe, a następnie trenuje ensemble ML
+(RandomForest + HistGradientBoosting), który przewiduje kierunek ceny w
+najbliższych świecach oraz - regresorami kwantylowymi - prawdopodobny zakres
+przyszłej ceny. Wszystko trafia na jeden wykres: formacje, wskaźniki, sugerowany
+kierunek transakcji (**LONG / SHORT / NEUTRALNY**) i **prognozowany stożek ceny
+rozciągnięty w przyszłość** za ostatnią świecą.
 
 ## Instalacja
 
@@ -45,13 +47,19 @@ Parametry:
    MACD, Stochastic, Bollinger Bands, ATR, ADX, wolumen) i łączy je z formacjami
    świecowymi w macierz cech dla modelu. Etykieta to kierunek ceny za `horizon`
    świec względem progu opartego o ATR (żeby odfiltrować szum).
-4. **`src/model.py`** — trenuje `RandomForestClassifier` z walidacją krzyżową
-   szeregu czasowego (`TimeSeriesSplit`, bez przecieku danych z przyszłości) i
-   zwraca prognozę (LONG/SHORT/NEUTRALNY) wraz z prawdopodobieństwami dla
-   najnowszej świecy.
+4. **`src/model.py`** — trenuje miękki ensemble (`VotingClassifier`) łączący
+   `RandomForestClassifier` z `HistGradientBoostingClassifier` (nowoczesny model
+   boostingowy), z walidacją krzyżową szeregu czasowego (`TimeSeriesSplit`, bez
+   przecieku danych z przyszłości); zwraca prognozę (LONG/SHORT/NEUTRALNY) wraz
+   z prawdopodobieństwami. Dodatkowo trenuje trzy regresory kwantylowe
+   (`HistGradientBoostingRegressor`, percentyle 10/50/90) przewidujące przyszłą
+   stopę zwrotu - to one napędzają stożek prognozy ceny na wykresie.
 5. **`src/plotting.py`** — rysuje wykres świecowy (`mplfinance`) z SMA/Bollinger,
-   panelami RSI i MACD, wolumenem, znacznikami formacji (▲ bycze / ▼ niedźwiedzie)
-   oraz ramką z sygnałem ML i strzałką kierunku transakcji.
+   panelami RSI i MACD, wolumenem, znacznikami formacji (▲ bycze / ▼ niedźwiedzie),
+   ramką z sygnałem ML i strzałką kierunku transakcji, a także **prognozowanym
+   stożkiem ceny** (przerywana linia mediany + zacieniowany zakres P10-P90)
+   rozciągniętym w przyszłość za ostatnią świecę - niepewność rośnie wraz
+   z odległością w czasie (skalowanie `sqrt(t)`).
 
 ## Uwaga
 
