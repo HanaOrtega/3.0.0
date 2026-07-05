@@ -3,13 +3,15 @@ Rozpoznawanie formacji świecowych + ML + analiza techniczna dla wybranego instr
 
 Przykład użycia:
     python main.py --ticker AAPL --period 2y --interval 1d --horizon 5
+    python main.py --ticker AAPL --news-file output/news_AAPL_20260705T120000Z.json
 
 Program:
-  1. Pobiera dane OHLCV z yfinance.
+  1. Pobiera dane OHLCV z yfinance (+ opcjonalnie świeże wzmianki z X, jeśli
+     wskazano --news-file z news_scraper.py).
   2. Liczy wskaźniki analizy technicznej (SMA, EMA, RSI, MACD, Bollinger, ATR, ADX...).
   3. Wykrywa klasyczne formacje świecowe (młot, objęcie bessy/hossy, gwiazda poranna itd.).
-  4. Trenuje ensemble ML (RandomForest + HistGradientBoosting) przewidujący kierunek
-     ceny za `horizon` świec, oraz regresory kwantylowe do prognozy ścieżki ceny.
+  4. Trenuje stacking ensemble ML (RandomForest + HistGradientBoosting) przewidujący
+     kierunek ceny za `horizon` świec, oraz regresory kwantylowe do prognozy ścieżki ceny.
   5. Rysuje wykres świecowy ze wskaźnikami, formacjami, sygnałem ML (LONG/SHORT/
      NEUTRALNY) oraz stożkiem prognozy ceny rozciągniętym w przyszłość.
 """
@@ -18,9 +20,11 @@ import argparse
 import sys
 
 from src.data import fetch_ohlcv
-from src.features import build_feature_matrix
+from src.features import MAX_INDICATOR_LOOKBACK, build_feature_matrix
 from src.model import predict_latest, predict_price_path, train_model, train_quantile_models
 from src.plotting import plot_chart
+from src.quality import DataQualityError, validate_ohlcv
+from src.sentiment import load_x_sentiment
 
 
 def parse_args():
@@ -33,6 +37,10 @@ def parse_args():
     p.add_argument("--last-n", type=int, default=150, help="Ile ostatnich świec pokazać na wykresie")
     p.add_argument("--save", default=None, help="Ścieżka do zapisu wykresu (np. wykres.png)")
     p.add_argument("--no-show", action="store_true", help="Nie otwieraj okna z wykresem (tylko zapis)")
+    p.add_argument(
+        "--news-file", default=None,
+        help="Ścieżka do pliku JSON z news_scraper.py - dołącza sentyment z X jako dodatkowe cechy",
+    )
     return p.parse_args()
 
 
@@ -43,9 +51,22 @@ def main():
     df = fetch_ohlcv(args.ticker, period=args.period, interval=args.interval)
     print(f"Pobrano {len(df)} świec: {df.index[0].date()} -> {df.index[-1].date()}")
 
+    try:
+        quality = validate_ohlcv(df)
+        quality.print_warnings()
+    except DataQualityError as exc:
+        print(f"BŁĄD: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    sentiment = None
+    if args.news_file:
+        print(f"Wczytywanie sentymentu z X: {args.news_file}...")
+        sentiment = load_x_sentiment(args.news_file)
+        print(f"Znaleziono dane sentymentu dla {len(sentiment)} dni.")
+
     print("Liczenie wskaźników technicznych i formacji świecowych...")
     features, pat, X, y, y_reg, feature_cols = build_feature_matrix(
-        df, horizon=args.horizon, atr_mult=args.atr_mult
+        df, horizon=args.horizon, atr_mult=args.atr_mult, sentiment=sentiment
     )
 
     if len(X) < 100:
@@ -55,9 +76,9 @@ def main():
             file=sys.stderr,
         )
 
-    print(f"Trenowanie modelu ML (RandomForest + HistGradientBoosting) na {len(X)} próbkach "
+    print(f"Trenowanie modelu ML (stacking: RandomForest + HistGradientBoosting) na {len(X)} próbkach "
           f"(horyzont = {args.horizon} świec)...")
-    result = train_model(X, y, gap=args.horizon)
+    result = train_model(X, y, gap=args.horizon, embargo=MAX_INDICATOR_LOOKBACK)
 
     print(f"\nŚrednia trafność (walidacja krzyżowa szeregu czasowego): {result.cv_accuracy * 100:.1f}%")
     print("\nRaport klasyfikacji (ostatni fold walidacyjny):")

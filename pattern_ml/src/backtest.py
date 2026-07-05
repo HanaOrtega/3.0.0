@@ -41,9 +41,28 @@ class MLStrategy(Strategy):
     sl_atr_mult = 1.5
     tp_atr_mult = 2.5
 
+    # kill-switch: wstrzymuje otwieranie NOWYCH pozycji (nie zamyka istniejących -
+    # o to dba SL/TP), gdy strategia wpadnie w wyraźną serię strat, chroniąc przed
+    # dalszym "uporczywym" handlem w reżimie, w którym model wyraźnie się myli
+    max_drawdown_halt = 0.25
+    loss_streak_halt = 5
+
     def init(self):
         self._model = None
         self._last_train_len = -1
+        self._peak_equity = self.equity
+
+    def _kill_switch_active(self) -> bool:
+        self._peak_equity = max(self._peak_equity, self.equity)
+        drawdown = 1 - self.equity / self._peak_equity
+        if drawdown > self.max_drawdown_halt:
+            return True
+
+        recent = self.closed_trades[-self.loss_streak_halt:]
+        if len(recent) >= self.loss_streak_halt and all(t.pl < 0 for t in recent):
+            return True
+
+        return False
 
     def next(self):
         n = len(self.data.df)
@@ -58,7 +77,7 @@ class MLStrategy(Strategy):
         start = max(0, n - self.train_window)
         df_slice = self.data.df.iloc[start:]
         features, _, _, _, _, feature_cols = build_feature_matrix(
-            df_slice, horizon=self.horizon, atr_mult=self.atr_mult
+            df_slice, horizon=self.horizon, atr_mult=self.atr_mult, quiet=True
         )
         valid = features.dropna(subset=feature_cols)
         if valid.empty:
@@ -78,24 +97,28 @@ class MLStrategy(Strategy):
         if confidence < self.min_confidence:
             return
 
+        if pred_class == 0 and self.position:
+            self.position.close()
+            return
+        if pred_class == 0 or self._kill_switch_active():
+            return
+
         price = self.data.Close[-1]
         sl_dist = self.sl_atr_mult * atr
         tp_dist = self.tp_atr_mult * atr
         fraction = float(np.clip(self.risk_pct / (sl_dist / price), 0.01, 0.99))
 
-        if pred_class == 1:
-            if not self.position.is_long:
-                self.buy(size=fraction, sl=price - sl_dist, tp=price + tp_dist)
-        elif pred_class == -1:
-            if not self.position.is_short:
-                self.sell(size=fraction, sl=price + sl_dist, tp=price - tp_dist)
-        elif self.position:
-            self.position.close()
+        if pred_class == 1 and not self.position.is_long:
+            self.buy(size=fraction, sl=price - sl_dist, tp=price + tp_dist)
+        elif pred_class == -1 and not self.position.is_short:
+            self.sell(size=fraction, sl=price + sl_dist, tp=price - tp_dist)
 
     def _retrain(self, n: int) -> None:
         start = max(0, n - self.train_window)
         df_slice = self.data.df.iloc[start:]
-        _, _, X, y, _, _ = build_feature_matrix(df_slice, horizon=self.horizon, atr_mult=self.atr_mult)
+        _, _, X, y, _, _ = build_feature_matrix(
+            df_slice, horizon=self.horizon, atr_mult=self.atr_mult, quiet=True
+        )
         if len(X) < MIN_WARMUP_BARS or y.nunique() < 2:
             return
         clf = make_classifier()
@@ -114,6 +137,8 @@ def run_backtest(
     risk_pct: float = 0.01,
     sl_atr_mult: float = 1.5,
     tp_atr_mult: float = 2.5,
+    max_drawdown_halt: float = 0.25,
+    loss_streak_halt: int = 5,
     cash: float = 10_000,
     commission: float = 0.0007,
 ):
@@ -130,6 +155,8 @@ def run_backtest(
             risk_pct=risk_pct,
             sl_atr_mult=sl_atr_mult,
             tp_atr_mult=tp_atr_mult,
+            max_drawdown_halt=max_drawdown_halt,
+            loss_streak_halt=loss_streak_halt,
         ),
     )
     bt = Backtest(

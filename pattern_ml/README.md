@@ -1,11 +1,12 @@
 # Rozpoznawanie formacji świecowych z ML + analiza techniczna
 
-Program pobiera dane rynkowe z **yfinance**, liczy wskaźniki analizy technicznej,
-wykrywa klasyczne formacje świecowe, a następnie trenuje ensemble ML
-(RandomForest + HistGradientBoosting), który przewiduje kierunek ceny w
-najbliższych świecach oraz - regresorami kwantylowymi - prawdopodobny zakres
-przyszłej ceny. Wszystko trafia na jeden wykres: formacje, wskaźniki, sugerowany
-kierunek transakcji (**LONG / SHORT / NEUTRALNY**) i **prognozowany stożek ceny
+Program pobiera dane rynkowe z **yfinance** (+ opcjonalnie świeże wzmianki z X
+jako sentyment), liczy wskaźniki analizy technicznej, wykrywa klasyczne
+formacje świecowe, a następnie trenuje stacking ensemble ML (RandomForest +
+HistGradientBoosting), który przewiduje kierunek ceny w najbliższych świecach
+oraz - regresorami kwantylowymi - prawdopodobny zakres przyszłej ceny.
+Wszystko trafia na jeden wykres: formacje, wskaźniki, sugerowany kierunek
+transakcji (**LONG / SHORT / NEUTRALNY**) i **prognozowany stożek ceny
 rozciągnięty w przyszłość** za ostatnią świecą.
 
 ## Instalacja
@@ -21,6 +22,9 @@ pip install -r requirements.txt
 
 ```bash
 python main.py --ticker AAPL --period 2y --interval 1d --horizon 5
+
+# ze sentymentem z X (najpierw uruchom news_scraper.py, patrz niżej):
+python main.py --ticker AAPL --news-file output/news_AAPL_20260705T120000Z.json
 ```
 
 Parametry:
@@ -35,31 +39,58 @@ Parametry:
 | `--last-n` | Liczba ostatnich świec pokazywanych na wykresie | `150` |
 | `--save` | Ścieżka zapisu wykresu jako PNG | brak |
 | `--no-show` | Nie otwieraj interaktywnego okna (przydatne np. przy `--save`) | wyłączone |
+| `--news-file` | Plik JSON z `news_scraper.py` - dołącza sentyment z X jako dodatkowe cechy | brak |
 
 ## Jak to działa
 
-1. **`src/data.py`** — pobiera OHLCV z `yfinance`.
-2. **`src/patterns.py`** — wykrywa formacje świecowe regułami opartymi o kształt
+1. **`src/data.py`** — pobiera OHLCV z `yfinance`; ponawia pobieranie z
+   wykładniczym backoffem przy chwilowym błędzie sieci, przycina `--period` do
+   realnych limitów yfinance dla danych śróddziennych (inaczej zapytanie poza
+   limitem po cichu zwraca puste/obcięte dane) i normalizuje strefę czasową
+   indeksu.
+2. **`src/quality.py`** — bramka jakości danych przed treningiem: twardy błąd
+   przy stanowczo zbyt krótkiej historii, ostrzeżenia przy nieaktualnych danych
+   (ticker może być wycofany z giełdy) i podejrzanie dużych przerwach w serii.
+3. **`src/patterns.py`** — wykrywa formacje świecowe regułami opartymi o kształt
    świec (doji, młot, spadająca gwiazda, objęcie hossy/bessy, gwiazda poranna/
    wieczorna, trzej biali żołnierze/trzy czarne kruki, linia przebicia, zasłona
    ciemnej chmury) i buduje z nich skumulowany sygnał kierunkowy.
-3. **`src/features.py`** — liczy wskaźniki analizy technicznej (SMA, EMA, RSI,
+4. **`src/features.py`** — liczy wskaźniki analizy technicznej (SMA, EMA, RSI,
    MACD, Stochastic, Bollinger Bands, ATR, ADX, wolumen) i łączy je z formacjami
-   świecowymi w macierz cech dla modelu. Etykieta to kierunek ceny za `horizon`
-   świec względem progu opartego o ATR (żeby odfiltrować szum).
-4. **`src/model.py`** — trenuje miękki ensemble (`VotingClassifier`) łączący
-   `RandomForestClassifier` z `HistGradientBoostingClassifier` (nowoczesny model
-   boostingowy), z walidacją krzyżową szeregu czasowego (`TimeSeriesSplit`, bez
-   przecieku danych z przyszłości); zwraca prognozę (LONG/SHORT/NEUTRALNY) wraz
-   z prawdopodobieństwami. Dodatkowo trenuje trzy regresory kwantylowe
-   (`HistGradientBoostingRegressor`, percentyle 10/50/90) przewidujące przyszłą
-   stopę zwrotu - to one napędzają stożek prognozy ceny na wykresie.
-5. **`src/plotting.py`** — rysuje wykres świecowy (`mplfinance`) z SMA/Bollinger,
+   świecowymi (+ opcjonalnie sentymentem z X) w macierz cech dla modelu.
+   Etykieta to kierunek ceny za `horizon` świec względem progu opartego o ATR
+   (żeby odfiltrować szum). Wskaźniki nigdy nie są sztucznie uzupełniane
+   (ffill/bfill) - wiersze z brakującymi danymi są odrzucane, z ostrzeżeniem,
+   gdy to oznacza utratę dużej części małego zbioru.
+5. **`src/sentiment.py`** — wczytuje wynik `news_scraper.py` i agreguje świeże
+   wzmianki z X do dziennych cech (liczba wzmianek, zaangażowanie, prosta
+   polaryzacja leksykonowa, dni od ostatniej wzmianki), dołączanych do macierzy
+   cech z forward-fillem ograniczonym czasowo.
+6. **`src/model.py`** — trenuje stacking ensemble (`StackingClassifier`) łączący
+   `RandomForestClassifier` z `HistGradientBoostingClassifier` przez meta-model
+   `LogisticRegression`, z walidacją krzyżową szeregu czasowego typu
+   purged+embargo (bez przecieku danych z przyszłości - patrz niżej); zwraca
+   prognozę (LONG/SHORT/NEUTRALNY) wraz z prawdopodobieństwami. Dodatkowo
+   trenuje trzy regresory kwantylowe (`HistGradientBoostingRegressor`,
+   percentyle 10/50/90) przewidujące przyszłą stopę zwrotu - to one napędzają
+   stożek prognozy ceny na wykresie.
+7. **`src/plotting.py`** — rysuje wykres świecowy (`mplfinance`) z SMA/Bollinger,
    panelami RSI i MACD, wolumenem, znacznikami formacji (▲ bycze / ▼ niedźwiedzie),
    ramką z sygnałem ML i strzałką kierunku transakcji, a także **prognozowanym
    stożkiem ceny** (przerywana linia mediany + zacieniowany zakres P10-P90)
    rozciągniętym w przyszłość za ostatnią świecę - niepewność rośnie wraz
    z odległością w czasie (skalowanie `sqrt(t)`).
+
+### Purged CV + embargo (poprawka przecieku danych)
+
+Etykieta każdej próbki zależy od ceny `horizon` świec w przyszłość, więc zwykły
+`TimeSeriesSplit` bez przerwy przecieka dane na granicy train/test. `gap=horizon`
+usuwa ten podstawowy przeciek, ale nasze cechy mają też dłuższe "okno pamięci"
+niż `horizon` (np. SMA50 vs domyślny `horizon=5`) - dlatego `src/model.py`
+dokłada dodatkowo **embargo** (`MAX_INDICATOR_LOOKBACK=50` próbek odciętych z
+końca train foldu) oraz dobiera liczbę foldów adaptacyjnie do rozmiaru danych
+(`choose_n_splits`), zamiast sztywnego podziału, który przy krótkiej historii
+mógłby dać foldy zbyt małe do sensownego treningu/oceny.
 
 ## Świeże wzmianki o instrumencie z X (Twitter)
 
@@ -137,6 +168,8 @@ python backtest_run.py --ticker AAPL --period 3y --interval 1d
 | `--min-confidence` | Min. prawdopodobieństwo klasy, żeby wejść w pozycję | `0.40` |
 | `--risk-pct` | Ryzyko na transakcję jako ułamek kapitału | `0.01` |
 | `--sl-atr-mult` / `--tp-atr-mult` | Odległość stop-loss / take-profit jako wielokrotność ATR | `1.5` / `2.5` |
+| `--max-drawdown-halt` | Kill-switch: wstrzymaj nowe pozycje po tym obsunięciu kapitału | `0.25` |
+| `--loss-streak-halt` | Kill-switch: wstrzymaj nowe pozycje po tylu stratnych transakcjach z rzędu | `5` |
 | `--cash` | Kapitał początkowy | `10000` |
 | `--commission` | Prowizja jako ułamek wartości transakcji | `0.0007` |
 | `--out` | Katalog zapisu interaktywnego raportu HTML | `output` |
@@ -201,12 +234,58 @@ to na dwóch poziomach:
   parametr `gap=horizon`, więc walidacja krzyżowa też pomija ten sam bufor
   między foldami.
 
+### Kill-switch
+
+`MLStrategy` wstrzymuje otwieranie **nowych** pozycji (istniejące dalej
+zarządzane są normalnie przez SL/TP), gdy obsunięcie kapitału przekroczy
+`--max-drawdown-halt` albo ostatnie `--loss-streak-halt` transakcji z rzędu
+były stratne - to zabezpieczenie przed "upartym" handlem w reżimie rynkowym,
+w którym model wyraźnie się myli, zamiast pozwolić stratom kumulować się bez
+ograniczeń do końca backtestu.
+
 ### Uwaga o czasie działania
 
 Retrenowanie ensemble (RandomForest + HistGradientBoosting) co `--retrain-every`
 świec jest kosztowne obliczeniowo - backtest na kilkuset świecach może potrwać
 od kilkudziesięciu sekund do kilku minut. Zwiększ `--retrain-every` lub zmniejsz
 `--train-window`, żeby przyspieszyć kosztem rzadszej aktualizacji modelu.
+
+## Co zaczerpnięto z JuggleLab (i co celowo pominięto)
+
+Kilka elementów tego projektu wzorowanych jest na analizie kodu
+[JuggleLab](https://github.com/HanaOrtega/JuggleLab) - osobnego, znacznie
+bardziej rozbudowanego pipeline'u ML do prognozowania cen (Temporal Fusion
+Transformer, multi-stage training, tuner hiperparametrów). Przeniesiono
+uproszczone, tanie w utrzymaniu wersje kilku pomysłów:
+
+- **Sentyment z X** (`src/sentiment.py`) - wzorzec provider/join z
+  `data/macro.py` + `data/sentiment.py`: osobne źródło danych agregowane do
+  dziennych cech, dołączane forward-fillem z zerowym fallbackiem.
+- **Odporność `fetch_ohlcv`** (`src/data.py`) - retry z backoffem, limit dni dla
+  danych śróddziennych, normalizacja strefy czasowej - wzorem `data/fetching.py`.
+- **Nigdy nie wypełniaj wskaźników sztucznie** (`src/features.py`) - wzorem
+  `data/preprocessing_modules/data_cleaning.py`: NaN we wskaźnikach TA są
+  odrzucane, nie interpolowane, z ostrzeżeniem przy dużej utracie danych.
+- **Purged CV + embargo + adaptacyjne foldy** (`src/model.py`) - wzorem
+  `pipeline/orchestrator_modules/cross_validation.py` i `cv_requirements.py`.
+- **Stacking zamiast prostego uśredniania** (`src/model.py`) - wzorem
+  `models/ensemble.py::train_stacking_meta_model` (tam `RidgeCV`, tu
+  `LogisticRegression`, bo nasz problem to klasyfikacja, nie regresja).
+- **Kill-switch w backteście** (`src/backtest.py`) - wzorem
+  `pipeline/pnl_simulation/simulator.py`.
+- **Pre-flight bramka jakości danych** (`src/quality.py`) - uproszczona wersja
+  twardych sprawdzeń z `cv_requirements.py`/`cross_validation_validation.py`.
+
+Celowo pominięto: Temporal Fusion Transformer (`models/tft.py`) - deep learning
+nieprzystający do sklearnowego ensemble; własny parser YAML i 3-warstwowy
+system configów - zbędna złożoność dla projektu sterowanego flagami CLI;
+integrację z MLflow/W&B/Neptune - print-y w konsoli wystarczają dla
+jednoosobowego skryptu; rozbudowany system raportowania jakości danych
+(Excel/JSONL, ~1100 linii) - dashboard dla zespołu, nie zabezpieczenie dla
+pojedynczego uruchomienia. Część plików w JuggleLab (`cross_validation.py`,
+`quality_monitoring.py`, `model_selection.py`) zawierała nierozwiązane
+konflikty mergów w momencie analizy - potraktowano je jako punkt odniesienia
+projektowy, nie kod do kopiowania 1:1.
 
 ## Uwaga
 

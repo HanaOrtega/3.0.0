@@ -1,10 +1,10 @@
 """Modele ML: klasyfikacja kierunku (LONG/SHORT/NEUTRALNY) + regresja kwantylowa
 przyszłej stopy zwrotu (do narysowania stożka prognozy na wykresie).
 
-Klasyfikator to miękki ensemble (soft-voting) RandomForest + HistGradientBoosting -
-połączenie modelu opartego na baggingu z nowoczesnym modelem boostingowym zwykle
-daje stabilniejsze i lepiej skalibrowane prawdopodobieństwa niż pojedynczy model,
-co jest dziś standardowym podejściem do danych tabelarycznych (m.in. finansowych).
+Klasyfikator to stacking ensemble (RandomForest + HistGradientBoosting, meta-model
+LogisticRegression) - zamiast prostego uśredniania (soft-voting) meta-model uczy
+się, jak ważyć predykcje obu modeli bazowych na podstawie ich (out-of-fold)
+trafności, co zwykle daje lepiej skalibrowany wynik końcowy niż stałe wagi.
 """
 
 from dataclasses import dataclass
@@ -15,16 +15,20 @@ from sklearn.ensemble import (
     HistGradientBoostingClassifier,
     HistGradientBoostingRegressor,
     RandomForestClassifier,
-    VotingClassifier,
+    StackingClassifier,
 )
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 from sklearn.model_selection import TimeSeriesSplit
 
 LABELS = {1: "LONG", -1: "SHORT", 0: "NEUTRALNY"}
 QUANTILES = (0.1, 0.5, 0.9)
 
+MIN_TRAIN_FOLD = 60
+MIN_TEST_FOLD = 20
 
-def make_classifier() -> VotingClassifier:
+
+def make_classifier() -> StackingClassifier:
     rf = RandomForestClassifier(
         n_estimators=300,
         max_depth=6,
@@ -41,31 +45,74 @@ def make_classifier() -> VotingClassifier:
         class_weight="balanced",
         random_state=42,
     )
-    return VotingClassifier(estimators=[("rf", rf), ("hgb", hgb)], voting="soft")
+    meta = LogisticRegression(max_iter=1000, class_weight="balanced")
+    # cv=3 (StratifiedKFold domyślny dla klasyfikacji): sklearn generuje przez to
+    # out-of-fold predykcje bazowych modeli do treningu meta-modelu za pomocą
+    # cross_val_predict, który wymaga PEŁNEJ partycji danych - TimeSeriesSplit
+    # tego nie zapewnia (pierwsza porcja próbek nigdy nie trafia do żadnego test
+    # folda), więc nie da się jej tu podstawić. To niewielkie ustępstwo dotyczy
+    # WYŁĄCZNIE wag łączących oba modele bazowe - nie ma wpływu na uczciwość
+    # głównej walidacji walk-forward w train_model (purged_splits poniżej),
+    # która pozostaje w pełni respektująca porządek czasowy.
+    return StackingClassifier(
+        estimators=[("rf", rf), ("hgb", hgb)],
+        final_estimator=meta,
+        cv=3,
+        stack_method="predict_proba",
+    )
+
+
+def choose_n_splits(n_samples: int, max_splits: int = 5) -> int:
+    """Dobiera liczbę foldów CV tak, żeby każdy fold miał sensowną liczbę próbek
+    (zamiast stałego podziału, który przy krótkiej historii może dać foldy zbyt
+    małe do wytrenowania/oceny modelu)."""
+    for n_splits in range(max_splits, 1, -1):
+        test_size = n_samples // (n_splits + 1)
+        train_size = n_samples - n_splits * test_size
+        if test_size >= MIN_TEST_FOLD and train_size >= MIN_TRAIN_FOLD:
+            return n_splits
+    return 2
+
+
+def purged_splits(n_samples: int, n_splits: int, gap: int = 0, embargo: int = 0):
+    """TimeSeriesSplit z purgingiem (`gap`, natywny parametr sklearn) i embargiem
+    dodatkowym buforem `embargo` próbek odciętym z KOŃCA train foldu, oprócz `gap`.
+
+    Embargo jest istotne, gdy cechy mają dłuższe okno "pamięci" niż `horizon`
+    etykiety (np. SMA50 vs horizon=5) - sam `gap` czyści tylko tyle, ile wynika
+    z konstrukcji etykiety, a embargo dodatkowo zabezpiecza przed przeciekiem
+    przez autokorelację wskaźników o dłuższym oknie."""
+    tscv = TimeSeriesSplit(n_splits=n_splits, gap=gap)
+    for train_idx, test_idx in tscv.split(np.arange(n_samples)):
+        if embargo and len(train_idx):
+            cutoff = train_idx[-1] - embargo
+            train_idx = train_idx[train_idx <= cutoff]
+        yield train_idx, test_idx
 
 
 @dataclass
 class TrainResult:
-    model: VotingClassifier
+    model: StackingClassifier
     report: str
     feature_importances: pd.Series
     cv_accuracy: float
 
 
-def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0) -> TrainResult:
-    """Trenuje ensemble RF + HistGradientBoosting z walidacją krzyżową szeregu
-    czasowego (bez przecieku danych z przyszłości).
+def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, embargo: int = 0) -> TrainResult:
+    """Trenuje stacking ensemble RF + HistGradientBoosting z walidacją krzyżową
+    szeregu czasowego (purged + embargo, bez przecieku danych z przyszłości).
 
-    `gap` (tzw. purging) pomija `gap` próbek między train a test foldem - istotne
-    bo etykieta każdej próbki zależy od ceny `horizon` świec w przód, więc bez
-    tej przerwy ostatnie próbki treningowe "widziałyby" fragment danych z okna
-    testowego (przeciek informacji z przyszłości na granicy foldów).
+    `gap` pomija próbki między train a test foldem odpowiadające horyzontowi
+    etykiety; `embargo` dokłada dodatkowy bufor na końcu train foldu, żeby
+    długoterminowe wskaźniki (np. SMA50) też nie "widziały" fragmentu test foldu.
     """
-    tscv = TimeSeriesSplit(n_splits=min(n_splits, max(2, len(X) // 50)), gap=gap)
+    n_splits = min(n_splits, choose_n_splits(len(X)))
 
     accuracies = []
     last_pred, last_true = None, None
-    for train_idx, test_idx in tscv.split(X):
+    for train_idx, test_idx in purged_splits(len(X), n_splits, gap=gap, embargo=embargo):
+        if len(train_idx) < MIN_TRAIN_FOLD // 2 or len(test_idx) == 0:
+            continue
         clf = make_classifier()
         clf.fit(X.iloc[train_idx], y.iloc[train_idx])
         pred = clf.predict(X.iloc[test_idx])
@@ -75,7 +122,7 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0) 
     report = classification_report(
         last_true, last_pred, labels=[-1, 0, 1],
         target_names=["SHORT", "NEUTRALNY", "LONG"], zero_division=0,
-    )
+    ) if last_true is not None else "Za mało danych na sensowną walidację krzyżową."
 
     # finalny model trenowany na wszystkich dostępnych danych historycznych
     final_model = make_classifier()
@@ -89,7 +136,7 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0) 
         model=final_model,
         report=report,
         feature_importances=rf_importances,
-        cv_accuracy=float(np.mean(accuracies)),
+        cv_accuracy=float(np.mean(accuracies)) if accuracies else float("nan"),
     )
 
 

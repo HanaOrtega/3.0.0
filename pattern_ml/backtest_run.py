@@ -15,6 +15,7 @@ Przykład:
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -22,6 +23,7 @@ import pandas as pd
 from src.backtest import run_backtest
 from src.baselines import BASELINES, run_baseline_backtest
 from src.data import fetch_ohlcv
+from src.quality import DataQualityError, validate_ohlcv
 
 SUMMARY_COLS = [
     "Return [%]", "Buy & Hold Return [%]", "Sharpe Ratio", "Max. Drawdown [%]",
@@ -42,6 +44,8 @@ def parse_args():
     p.add_argument("--risk-pct", type=float, default=0.01, help="Ryzyko na transakcję jako ułamek kapitału")
     p.add_argument("--sl-atr-mult", type=float, default=1.5, help="Odległość stop-loss jako wielokrotność ATR")
     p.add_argument("--tp-atr-mult", type=float, default=2.5, help="Odległość take-profit jako wielokrotność ATR")
+    p.add_argument("--max-drawdown-halt", type=float, default=0.25, help="Kill-switch: wstrzymaj nowe pozycje po tej wielkości obsunięcia kapitału")
+    p.add_argument("--loss-streak-halt", type=int, default=5, help="Kill-switch: wstrzymaj nowe pozycje po tylu stratnych transakcjach z rzędu")
     p.add_argument("--cash", type=float, default=10_000, help="Kapitał początkowy")
     p.add_argument("--commission", type=float, default=0.0007, help="Prowizja jako ułamek wartości transakcji")
     p.add_argument("--out", default="output", help="Katalog zapisu raportów HTML")
@@ -82,6 +86,13 @@ def main():
     df = fetch_ohlcv(args.ticker, period=args.period, interval=args.interval)
     print(f"Pobrano {len(df)} świec: {df.index[0].date()} -> {df.index[-1].date()}")
 
+    try:
+        quality = validate_ohlcv(df, min_rows=150)  # backtest potrzebuje więcej historii niż pojedynczy sygnał
+        quality.print_warnings()
+    except DataQualityError as exc:
+        print(f"BŁĄD: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -101,6 +112,8 @@ def main():
         risk_pct=args.risk_pct,
         sl_atr_mult=args.sl_atr_mult,
         tp_atr_mult=args.tp_atr_mult,
+        max_drawdown_halt=args.max_drawdown_halt,
+        loss_streak_halt=args.loss_streak_halt,
         cash=args.cash,
         commission=args.commission,
     )

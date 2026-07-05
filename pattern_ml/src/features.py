@@ -8,6 +8,11 @@ from ta.volatility import AverageTrueRange, BollingerBands
 from ta.volume import OnBalanceVolumeIndicator
 
 from .patterns import detect_all
+from .sentiment import merge_sentiment_features
+
+AGGRESSIVE_CLEANING_ROW_THRESHOLD = 200
+AGGRESSIVE_CLEANING_DROP_FRACTION = 0.25
+MAX_INDICATOR_LOOKBACK = 50  # SMA50 - najdłuższe okno spośród cech w build_indicators
 
 
 def build_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -71,8 +76,15 @@ def _candle_shape_features(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_feature_matrix(df: pd.DataFrame, horizon: int = 5, atr_mult: float = 0.5):
-    """Łączy wskaźniki TA + formacje świecowe w macierz cech X oraz etykiety y.
+def build_feature_matrix(
+    df: pd.DataFrame,
+    horizon: int = 5,
+    atr_mult: float = 0.5,
+    sentiment: pd.DataFrame | None = None,
+    quiet: bool = False,
+):
+    """Łączy wskaźniki TA + formacje świecowe (+ opcjonalnie sentyment z X) w
+    macierz cech X oraz etykiety y.
 
     Etykieta klasyfikacyjna (y): kierunek ceny za `horizon` świec, w 3 klasach:
       1  = LONG  (wzrost > atr_mult * ATR)
@@ -81,6 +93,9 @@ def build_feature_matrix(df: pd.DataFrame, horizon: int = 5, atr_mult: float = 0
 
     Etykieta regresyjna (y_reg): ciągła stopa zwrotu za `horizon` świec - używana
     do wyznaczenia prognozowanej ścieżki ceny (stożka niepewności) na wykresie.
+
+    `sentiment` (opcjonalnie): wynik `src.sentiment.load_x_sentiment()` - dzienne
+    cechy świeżych wzmianek z X, dołączane jako dodatkowe kolumny `sent_*`.
 
     Zwraca: (features_df, patterns_df, X, y, y_reg, feature_cols).
     """
@@ -123,8 +138,25 @@ def build_feature_matrix(df: pd.DataFrame, horizon: int = 5, atr_mult: float = 0
         "pattern_signal",
     ] + list(pat.drop(columns=["pattern_signal"]).columns)
 
+    if sentiment is not None:
+        features = merge_sentiment_features(features, sentiment)
+        feature_cols += ["sent_mentions", "sent_engagement", "sent_polarity", "sent_days_since_mention"]
+
     model_data = features.dropna(subset=feature_cols)
     train_data = model_data.dropna(subset=["label", "future_return"])
+
+    # ostrzeżenie zamiast cichego trenowania na okrojonym zbiorze (wzorem
+    # data_cleaning.py z JuggleLab): wskaźniki TA nigdy nie są uzupełniane
+    # sztucznie (ffill/bfill) - wiersze z NaN są odrzucane, ale jeśli to
+    # oznacza utratę dużej części małego zbioru, użytkownik powinien o tym wiedzieć
+    if not quiet and len(features) < AGGRESSIVE_CLEANING_ROW_THRESHOLD and len(features) > 0:
+        dropped_fraction = 1 - len(model_data) / len(features)
+        if dropped_fraction > AGGRESSIVE_CLEANING_DROP_FRACTION:
+            print(
+                f"UWAGA: {dropped_fraction * 100:.0f}% wierszy odrzucono z powodu brakujących "
+                f"wskaźników (rozgrzewka SMA/EMA) na zbiorze zaledwie {len(features)} świec - "
+                "rozważ dłuższy --period, żeby model miał więcej danych treningowych."
+            )
 
     X = train_data[feature_cols].astype(float)
     y = train_data["label"].astype(int)
