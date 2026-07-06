@@ -23,6 +23,7 @@ import pandas as pd
 from src.backtest import run_backtest
 from src.baselines import BASELINES, run_baseline_backtest
 from src.data import fetch_ohlcv
+from src.macro import DEFAULT_BENCHMARK, derive_market_regime_features
 from src.quality import DataQualityError, validate_ohlcv
 
 SUMMARY_COLS = [
@@ -46,6 +47,14 @@ def parse_args():
     p.add_argument("--tp-atr-mult", type=float, default=2.5, help="Odległość take-profit jako wielokrotność ATR")
     p.add_argument("--max-drawdown-halt", type=float, default=0.25, help="Kill-switch: wstrzymaj nowe pozycje po tej wielkości obsunięcia kapitału")
     p.add_argument("--loss-streak-halt", type=int, default=5, help="Kill-switch: wstrzymaj nowe pozycje po tylu stratnych transakcjach z rzędu")
+    p.add_argument(
+        "--sizing-mode", choices=["quantile", "atr"], default="quantile",
+        help="'quantile': SL/TP z rozrzutu prognozy P10/P90 (z podłogą ATR); 'atr': stałe wielokrotności ATR",
+    )
+    p.add_argument(
+        "--benchmark", default=DEFAULT_BENCHMARK,
+        help="Indeks referencyjny do cech reżimu rynku (np. ^GSPC, ^GDAXI); pusty string wyłącza",
+    )
     p.add_argument("--cash", type=float, default=10_000, help="Kapitał początkowy")
     p.add_argument("--commission", type=float, default=0.0007, help="Prowizja jako ułamek wartości transakcji")
     p.add_argument("--out", default="output", help="Katalog zapisu raportów HTML")
@@ -93,6 +102,15 @@ def main():
         print(f"BŁĄD: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    market_regime = None
+    if args.benchmark:
+        try:
+            print(f"Pobieranie indeksu referencyjnego {args.benchmark} (cechy reżimu rynku)...")
+            benchmark_df = fetch_ohlcv(args.benchmark, period=args.period, interval=args.interval)
+            market_regime = derive_market_regime_features(benchmark_df)
+        except (ValueError, ConnectionError) as exc:
+            print(f"UWAGA: nie udało się pobrać indeksu referencyjnego ({exc}) - pomijam cechy reżimu rynku.")
+
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -112,8 +130,10 @@ def main():
         risk_pct=args.risk_pct,
         sl_atr_mult=args.sl_atr_mult,
         tp_atr_mult=args.tp_atr_mult,
+        sizing_mode=args.sizing_mode,
         max_drawdown_halt=args.max_drawdown_halt,
         loss_streak_halt=args.loss_streak_halt,
+        market_regime=market_regime,
         cash=args.cash,
         commission=args.commission,
     )

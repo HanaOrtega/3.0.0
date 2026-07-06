@@ -7,6 +7,8 @@ from ta.trend import MACD, ADXIndicator, CCIIndicator, EMAIndicator, SMAIndicato
 from ta.volatility import AverageTrueRange, BollingerBands
 from ta.volume import OnBalanceVolumeIndicator
 
+from .feature_selection import select_features
+from .macro import merge_market_regime
 from .patterns import detect_all
 from .sentiment import merge_sentiment_features
 
@@ -106,12 +108,16 @@ def _rolling_entropy(returns: pd.Series, window: int = 30, bins: int = 8) -> pd.
 def _regime_features(df: pd.DataFrame) -> pd.DataFrame:
     """Cechy opisujące "reżim" rynku (trend/mean-reversion/szum), wzorowane na
     feature_enrichment.py (fractional differencing) i custom_features.py
-    (wykładnik Hursta, entropia) z projektu JuggleLab."""
+    (wykładnik Hursta, entropia, rozkład zwrotów) z projektu JuggleLab."""
     out = pd.DataFrame(index=df.index)
     log_close = np.log(df["Close"])
+    returns = df["Close"].pct_change()
     out["frac_diff_close"] = _fractional_difference(log_close)
     out["hurst"] = log_close.rolling(40).apply(_hurst_exponent, raw=True)
-    out["return_entropy"] = _rolling_entropy(df["Close"].pct_change(), window=20)
+    out["return_entropy"] = _rolling_entropy(returns, window=20)
+    out["return_skew"] = returns.rolling(20).skew()
+    out["return_kurt"] = returns.rolling(20).kurt()
+    out["return_mad"] = returns.rolling(20).apply(lambda x: np.mean(np.abs(x - x.mean())), raw=True)
     return out
 
 
@@ -135,10 +141,13 @@ def build_feature_matrix(
     horizon: int = 5,
     atr_mult: float = 0.5,
     sentiment: pd.DataFrame | None = None,
+    market_regime: pd.DataFrame | None = None,
+    auto_select_features: bool = True,
+    preselected_features: list | None = None,
     quiet: bool = False,
 ):
-    """Łączy wskaźniki TA + formacje świecowe (+ opcjonalnie sentyment z X) w
-    macierz cech X oraz etykiety y.
+    """Łączy wskaźniki TA + formacje świecowe (+ opcjonalnie sentyment z X i reżim
+    rynku) w macierz cech X oraz etykiety y.
 
     Etykieta klasyfikacyjna (y): kierunek ceny za `horizon` świec, w 3 klasach:
       1  = LONG  (wzrost > atr_mult * ATR)
@@ -151,7 +160,22 @@ def build_feature_matrix(
     `sentiment` (opcjonalnie): wynik `src.sentiment.load_x_sentiment()` - dzienne
     cechy świeżych wzmianek z X, dołączane jako dodatkowe kolumny `sent_*`.
 
-    Zwraca: (features_df, patterns_df, X, y, y_reg, feature_cols).
+    `market_regime` (opcjonalnie): wynik `src.macro.derive_market_regime_features()`
+    - cechy reżimu całego rynku (indeksu referencyjnego), kolumny `mkt_*`.
+
+    `auto_select_features`: odrzuca cechy prawie stałe lub nadmiarowe (silnie
+    skorelowane z inną) - patrz `src.feature_selection.select_features`. Filtr
+    patrzy wyłącznie na same cechy (nie na etykietę), więc jest bezpieczny
+    względem przecieku danych. Ignorowane, jeśli podano `preselected_features`.
+
+    `preselected_features` (opcjonalnie): użyj DOKŁADNIE tej listy kolumn
+    zamiast auto-selekcji - potrzebne przy predykcji na modelu już
+    wytrenowanym na konkretnym zestawie cech (np. w walk-forward backteście,
+    gdzie okno danych przesuwa się co świecę, więc świeża auto-selekcja
+    mogłaby dać inny zestaw kolumn niż ten, na którym model faktycznie się uczył).
+
+    Zwraca: (features_df, patterns_df, X, y, y_reg, feature_cols) - `feature_cols`
+    to lista PO selekcji (jeśli włączona).
     """
     ind = build_indicators(df)
     pat = detect_all(df)
@@ -190,13 +214,17 @@ def build_feature_matrix(
         "close_vs_sma20", "close_vs_sma50", "sma20_vs_sma50", "ema_cross",
         "return_1", "return_5", "return_10", "volatility_10",
         "body_pct", "upper_shadow_pct", "lower_shadow_pct", "candle_direction",
-        "frac_diff_close", "hurst", "return_entropy",
+        "frac_diff_close", "hurst", "return_entropy", "return_skew", "return_kurt", "return_mad",
         "pattern_signal",
     ] + list(pat.drop(columns=["pattern_signal"]).columns)
 
     if sentiment is not None:
         features = merge_sentiment_features(features, sentiment)
         feature_cols += ["sent_mentions", "sent_engagement", "sent_polarity", "sent_days_since_mention"]
+
+    if market_regime is not None:
+        features = merge_market_regime(features, market_regime)
+        feature_cols += list(market_regime.columns)
 
     model_data = features.dropna(subset=feature_cols)
     train_data = model_data.dropna(subset=["label", "future_return"])
@@ -217,5 +245,12 @@ def build_feature_matrix(
     X = train_data[feature_cols].astype(float)
     y = train_data["label"].astype(int)
     y_reg = train_data["future_return"].astype(float)
+
+    if preselected_features is not None:
+        feature_cols = [c for c in preselected_features if c in X.columns]
+        X = X[feature_cols]
+    elif auto_select_features and not X.empty:
+        feature_cols = select_features(X)
+        X = X[feature_cols]
 
     return features, pat, X, y, y_reg, feature_cols

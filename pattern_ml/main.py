@@ -23,6 +23,7 @@ import numpy as np
 
 from src.data import fetch_ohlcv
 from src.features import MAX_INDICATOR_LOOKBACK, build_feature_matrix
+from src.macro import DEFAULT_BENCHMARK, derive_market_regime_features
 from src.model import predict_latest, predict_price_path, train_model, train_quantile_models
 from src.plotting import plot_chart
 from src.quality import DataQualityError, validate_ohlcv
@@ -48,6 +49,10 @@ def parse_args():
         "--news-file", default=None,
         help="Ścieżka do pliku JSON z news_scraper.py - dołącza sentyment z X jako dodatkowe cechy",
     )
+    p.add_argument(
+        "--benchmark", default=DEFAULT_BENCHMARK,
+        help="Indeks referencyjny do cech reżimu rynku (np. ^GSPC, ^GDAXI); pusty string wyłącza",
+    )
     return p.parse_args()
 
 
@@ -71,9 +76,18 @@ def main():
         sentiment = load_x_sentiment(args.news_file)
         print(f"Znaleziono dane sentymentu dla {len(sentiment)} dni.")
 
+    market_regime = None
+    if args.benchmark:
+        try:
+            print(f"Pobieranie indeksu referencyjnego {args.benchmark} (cechy reżimu rynku)...")
+            benchmark_df = fetch_ohlcv(args.benchmark, period=args.period, interval=args.interval)
+            market_regime = derive_market_regime_features(benchmark_df)
+        except (ValueError, ConnectionError) as exc:
+            print(f"UWAGA: nie udało się pobrać indeksu referencyjnego ({exc}) - pomijam cechy reżimu rynku.")
+
     print("Liczenie wskaźników technicznych i formacji świecowych...")
     features, pat, X, y, y_reg, feature_cols = build_feature_matrix(
-        df, horizon=args.horizon, atr_mult=args.atr_mult, sentiment=sentiment
+        df, horizon=args.horizon, atr_mult=args.atr_mult, sentiment=sentiment, market_regime=market_regime
     )
 
     if len(X) < 100:
@@ -85,9 +99,21 @@ def main():
 
     print(f"Trenowanie modelu ML (stacking: RandomForest + HistGradientBoosting) na {len(X)} próbkach "
           f"(horyzont = {args.horizon} świec)...")
-    result = train_model(X, y, gap=args.horizon, embargo=MAX_INDICATOR_LOOKBACK)
+    result = train_model(X, y, gap=args.horizon, embargo=MAX_INDICATOR_LOOKBACK, y_reg=y_reg)
+
+    if result.skipped_folds:
+        print(f"UWAGA: pominięto {result.skipped_folds} fold(y) walidacji krzyżowej - za mało zróżnicowanych klas.")
 
     print(f"\nŚrednia trafność (walidacja krzyżowa szeregu czasowego): {result.cv_accuracy * 100:.1f}%")
+    print(f"Trafność zbalansowana (odporna na przewagę klasy NEUTRALNY): {result.balanced_accuracy * 100:.1f}%")
+    print(f"MCC (Matthews Correlation Coefficient, -1..1): {result.mcc:.2f}")
+    if not np.isnan(result.auc_roc):
+        print(f"AUC-ROC (multi-class, one-vs-rest): {result.auc_roc:.2f}")
+    if not np.isnan(result.expectancy):
+        print(
+            f"Expectancy (śr. zwrot na transakcję kierunkową przy zalecanym progu pewności): "
+            f"{result.expectancy * 100:+.2f}%"
+        )
     print("\nRaport klasyfikacji (ostatni fold walidacyjny):")
     print(result.report)
     print("Najważniejsze cechy modelu:")

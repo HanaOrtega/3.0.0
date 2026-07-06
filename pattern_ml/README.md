@@ -95,6 +95,7 @@ Parametry:
 | `--save` | Ścieżka zapisu wykresu jako PNG | brak |
 | `--no-show` | Nie otwieraj interaktywnego okna (przydatne np. przy `--save`) | wyłączone |
 | `--news-file` | Plik JSON z `news_scraper.py` - dołącza sentyment z X jako dodatkowe cechy | brak |
+| `--benchmark` | Indeks referencyjny do cech reżimu rynku (np. `^GSPC`, `^GDAXI`); pusty string wyłącza | `^GSPC` |
 
 ## Jak to działa
 
@@ -195,6 +196,54 @@ możliwej okazji. Próg ma wbudowany próg minimalnej "częstości sygnału"
 nie sygnalizuje. W `main.py` i GUI próg stosowany jest domyślnie automatycznie
 (można go nadpisać ręcznie: `--min-confidence` / suwak w GUI).
 
+### Cechy makro/reżimu całego rynku
+
+Model oceniający pojedynczą spółkę (np. AAPL) wyłącznie na podstawie jej
+własnych danych nie "wie", czy cały rynek jest w hossie, korekcie czy panice -
+a formacja bycza w środku ogólnorynkowej wyprzedaży znaczy co innego niż ta
+sama formacja w silnym trendzie wzrostowym. `src/macro.py` (wzorem
+`data/macro.py::derive_market_regime_features` z JuggleLab) liczy z osobnego
+indeksu referencyjnego (domyślnie `^GSPC`, S&P 500, konfigurowalne przez
+`--benchmark`) zwrot 5d/21d, zmienność realizowaną 21d, obsunięcie od szczytu
+i trend 63d - i dołącza je do macierzy cech głównego tickera (`mkt_*`). Puste
+`--benchmark` wyłącza tę cechę.
+
+### Selekcja cech (bez przecieku danych)
+
+Po dodaniu sentymentu, reżimu rynku i cech statystycznych zbiór cech urósł do
+40-50 kolumn - część bywa niemal stała albo silnie skorelowana z inną (np.
+`return_5` z `return_10`), co zwiększa ryzyko przeuczenia bez realnej korzyści
+informacyjnej. `src/feature_selection.py::select_features` (wzorem
+`custom_features.py` z JuggleLab) odrzuca takie cechy automatycznie - **ale
+tylko na podstawie samych cech**, nigdy etykiety. W JuggleLab filtr obejmował
+też korelację cechy z targetem, co jest formą przecieku danych (dobór cech na
+bazie tego, co dopiero mamy przewidzieć) - tu świadomie pominięte, spójnie z
+resztą podejścia w tym projekcie (purged CV, embargo). Włączone domyślnie
+(`auto_select_features=True` w `build_feature_matrix`).
+
+### Adaptacyjne SL/TP ze stożka prognozy
+
+W backteście (`src/backtest.py`, `--sizing-mode quantile`, domyślne) odległości
+stop-loss/take-profit nie są już stałą wielokrotnością ATR, tylko wynikają z
+rozrzutu prognozy kwantylowej P10/P90 (tej samej, która rysuje stożek na
+wykresie w zakładce "Sygnał ML") - im szerszy stożek niepewności, tym szerszy
+stop, i odwrotnie. Podłoga 0.5x ATR chroni przed zbyt ciasnym stopem przy
+zdegenerowanym/wąskim stożku. `--sizing-mode atr` przywraca stare, czysto
+ATR-owe zachowanie.
+
+### Bogatsze metryki i zabezpieczenia walidacji krzyżowej
+
+`train_model` (obok dotychczasowej trafności) liczy teraz na zbiorczych
+out-of-fold predykcjach: **trafność zbalansowaną** i **MCC** (odporne na
+przewagę liczebną klasy NEUTRALNY, w przeciwieństwie do zwykłej trafności),
+**AUC-ROC** (multi-class, one-vs-rest) oraz - jeśli podano ciągłe stopy zwrotu
+(`y_reg`) - **expectancy**: średni zwrot na transakcję kierunkową przy
+zalecanym progu pewności (dodatnia = strategia w danych walidacyjnych
+zarabiała więcej niż traciła na takich sygnałach). Foldy CV, w których dane
+treningowe mają mniej niż 2 klasy (nie da się wytrenować klasyfikatora), są
+pomijane zamiast po cichu psuć wynik - z licznikiem `skipped_folds`
+widocznym w konsoli/GUI.
+
 ## Świeże wzmianki o instrumencie z X (Twitter)
 
 `news_scraper.py` loguje się do X (Playwright) i zbiera **wyłącznie świeże**
@@ -267,10 +316,12 @@ python backtest_run.py --ticker AAPL --period 3y --interval 1d
 | `--horizon` | Horyzont etykiety/decyzji w świecach | `5` |
 | `--atr-mult` | Próg etykiety jako wielokrotność ATR% | `0.5` |
 | `--retrain-every` | Co ile świec retrenować model | `20` |
-| `--train-window` | Rozmiar kroczącego okna treningowego | `250` |
+| `--train-window` | Rozmiar kroczącego okna treningowego | `300` |
 | `--min-confidence` | Min. prawdopodobieństwo klasy, żeby wejść w pozycję | `0.40` |
 | `--risk-pct` | Ryzyko na transakcję jako ułamek kapitału | `0.01` |
-| `--sl-atr-mult` / `--tp-atr-mult` | Odległość stop-loss / take-profit jako wielokrotność ATR | `1.5` / `2.5` |
+| `--sl-atr-mult` / `--tp-atr-mult` | Odległość stop-loss / take-profit jako wielokrotność ATR (podłoga w trybie `quantile`) | `1.5` / `2.5` |
+| `--sizing-mode` | `quantile` (SL/TP ze stożka prognozy) albo `atr` (stałe wielokrotności ATR) | `quantile` |
+| `--benchmark` | Indeks referencyjny do cech reżimu rynku; pusty string wyłącza | `^GSPC` |
 | `--max-drawdown-halt` | Kill-switch: wstrzymaj nowe pozycje po tym obsunięciu kapitału | `0.25` |
 | `--loss-streak-halt` | Kill-switch: wstrzymaj nowe pozycje po tylu stratnych transakcjach z rzędu | `5` |
 | `--cash` | Kapitał początkowy | `10000` |
@@ -388,6 +439,21 @@ uproszczone, tanie w utrzymaniu wersje kilku pomysłów:
   inspirowane `classification_thresholds.py`, ale z celem dopasowanym do tego
   projektu: maksymalizacja precyzji sygnałów kierunkowych (minimalizacja
   strat), nie ogólnego F1.
+- **Cechy makro/reżimu rynku** (`src/macro.py`) - wzorem
+  `data/macro.py::derive_market_regime_features`.
+- **Selekcja cech** (`src/feature_selection.py`) - wzorem `custom_features.py`,
+  z pominiętą (świadomie) korelacją cech z targetem, żeby nie wprowadzać
+  przecieku danych.
+- **Adaptacyjne SL/TP ze stożka prognozy** (`src/backtest.py::_risk_distances`) -
+  wzorem `utils/trading.py::calculate_trade_levels`, ale oparte o nasze już
+  istniejące regresory kwantylowe zamiast osobnej implementacji.
+- **Bogatsze metryki CV + zabezpieczenia przed zdegenerowanymi foldami**
+  (`src/model.py::train_model`) - wzorem `evaluation_classification.py`
+  (balanced accuracy, MCC, AUC-ROC, guard na foldy z <2 klasami) oraz
+  koncepcja "expectancy" z `pipeline/pnl_simulation/finance.py`, tu policzona
+  tanio z już zebranych out-of-fold predykcji zamiast osobnej symulacji P&L.
+- **Deklaratywna bramka jakości** (`src/quality.py::MetricRule`/`check_rules`) -
+  lekka wersja `MetricRule`/`ResultValidator` z `quality_monitoring.py`.
 
 Celowo pominięto: Temporal Fusion Transformer (`models/tft.py`) - deep learning
 nieprzystający do sklearnowego ensemble; własny parser YAML i 3-warstwowy

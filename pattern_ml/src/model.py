@@ -18,10 +18,16 @@ from sklearn.ensemble import (
     StackingClassifier,
 )
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report
+from sklearn.metrics import (
+    balanced_accuracy_score,
+    classification_report,
+    matthews_corrcoef,
+    roc_auc_score,
+)
 from sklearn.model_selection import TimeSeriesSplit
 
 LABELS = {1: "LONG", -1: "SHORT", 0: "NEUTRALNY"}
+CANONICAL_CLASSES = np.array([-1, 0, 1])
 QUANTILES = (0.1, 0.5, 0.9)
 
 MIN_TRAIN_FOLD = 60
@@ -90,6 +96,17 @@ def purged_splits(n_samples: int, n_splits: int, gap: int = 0, embargo: int = 0)
         yield train_idx, test_idx
 
 
+def _reindex_proba(proba: np.ndarray, classes: np.ndarray) -> np.ndarray:
+    """Ujednolica macierz prawdopodobieństw do stałego układu kolumn [-1, 0, 1],
+    wypełniając zerem klasy nieobecne w danym foldzie (rzadki przypadek przy
+    bardzo małych/niezbalansowanych foldach) - potrzebne, żeby móc bezpiecznie
+    scalać (pool) macierze z różnych foldów przed liczeniem AUC-ROC."""
+    out = np.zeros((proba.shape[0], len(CANONICAL_CLASSES)))
+    for i, c in enumerate(classes):
+        out[:, np.where(CANONICAL_CLASSES == c)[0][0]] = proba[:, i]
+    return out
+
+
 DEFAULT_CONFIDENCE_GRID = np.arange(0.36, 0.76, 0.02)
 
 
@@ -138,9 +155,21 @@ class TrainResult:
     cv_accuracy: float
     recommended_confidence: float
     recommended_confidence_precision: float
+    balanced_accuracy: float
+    mcc: float
+    auc_roc: float
+    expectancy: float
+    skipped_folds: int
 
 
-def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, embargo: int = 0) -> TrainResult:
+def train_model(
+    X: pd.DataFrame,
+    y: pd.Series,
+    n_splits: int = 5,
+    gap: int = 0,
+    embargo: int = 0,
+    y_reg: pd.Series | None = None,
+) -> TrainResult:
     """Trenuje stacking ensemble RF + HistGradientBoosting z walidacją krzyżową
     szeregu czasowego (purged + embargo, bez przecieku danych z przyszłości).
 
@@ -148,19 +177,34 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, 
     etykiety; `embargo` dokłada dodatkowy bufor na końcu train foldu, żeby
     długoterminowe wskaźniki (np. SMA50) też nie "widziały" fragmentu test foldu.
 
+    Foldy, w których train ma mniej niż 2 klasy (nie da się wytrenować
+    sensownego klasyfikatora) są pomijane - licznik w `skipped_folds`.
+
     Dodatkowo, na podstawie zbiorczych (pooled) out-of-fold predykcji ze
-    wszystkich foldów, dobiera próg pewności maksymalizujący precyzję sygnałów
-    kierunkowych (patrz `_tune_confidence_threshold`) - zwracany jako
-    `recommended_confidence` w wyniku.
+    wszystkich foldów:
+    - dobiera próg pewności maksymalizujący precyzję sygnałów kierunkowych
+      (patrz `_tune_confidence_threshold`) - `recommended_confidence`;
+    - liczy `balanced_accuracy`/`mcc`/`auc_roc` (bardziej odporne na przewagę
+      liczebną klasy NEUTRALNY niż zwykła trafność) oraz - jeśli podano
+      `y_reg` (ciągła stopa zwrotu) - `expectancy`: średni zwrot na transakcję
+      dla sygnałów kierunkowych powyżej `recommended_confidence` (dodatni =
+      strategia w przeszłości zarabiała więcej niż traciła na takich sygnałach).
     """
     n_splits = min(n_splits, choose_n_splits(len(X)))
 
     accuracies = []
     last_pred, last_true = None, None
     oof_records = []
+    oof_proba = []
+    oof_returns = []
+    skipped_folds = 0
     for train_idx, test_idx in purged_splits(len(X), n_splits, gap=gap, embargo=embargo):
         if len(train_idx) < MIN_TRAIN_FOLD // 2 or len(test_idx) == 0:
             continue
+        if y.iloc[train_idx].nunique() < 2:
+            skipped_folds += 1
+            continue
+
         clf = make_classifier()
         clf.fit(X.iloc[train_idx], y.iloc[train_idx])
         pred = clf.predict(X.iloc[test_idx])
@@ -174,6 +218,9 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, 
         fold_pred = classes[idx]
         true_vals = y.iloc[test_idx].values
         oof_records.append(np.column_stack([conf, fold_pred, true_vals]))
+        oof_proba.append(_reindex_proba(proba, classes))
+        if y_reg is not None:
+            oof_returns.append(y_reg.iloc[test_idx].values)
 
     report = classification_report(
         last_true, last_pred, labels=[-1, 0, 1],
@@ -182,6 +229,25 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, 
 
     records = np.concatenate(oof_records) if oof_records else np.empty((0, 3))
     recommended_confidence, recommended_precision = _tune_confidence_threshold(records)
+
+    balanced_acc = mcc = auc_roc = expectancy = float("nan")
+    if len(records) > 0:
+        pred_all, true_all = records[:, 1], records[:, 2]
+        balanced_acc = balanced_accuracy_score(true_all, pred_all)
+        mcc = matthews_corrcoef(true_all, pred_all)
+        try:
+            proba_all = np.concatenate(oof_proba)
+            auc_roc = roc_auc_score(true_all, proba_all, multi_class="ovr", labels=CANONICAL_CLASSES)
+        except ValueError:
+            auc_roc = float("nan")  # np. brakuje jednej z klas w zbiorczych danych walidacyjnych
+
+        if oof_returns and not np.isnan(recommended_precision):
+            returns_all = np.concatenate(oof_returns)
+            conf_all = records[:, 0]
+            mask = (conf_all >= recommended_confidence) & (pred_all != 0)
+            if mask.sum() > 0:
+                payoff = np.where(pred_all[mask] == 1, returns_all[mask], -returns_all[mask])
+                expectancy = float(payoff.mean())
 
     # finalny model trenowany na wszystkich dostępnych danych historycznych
     final_model = make_classifier()
@@ -198,6 +264,11 @@ def train_model(X: pd.DataFrame, y: pd.Series, n_splits: int = 5, gap: int = 0, 
         cv_accuracy=float(np.mean(accuracies)) if accuracies else float("nan"),
         recommended_confidence=recommended_confidence,
         recommended_confidence_precision=recommended_precision,
+        balanced_accuracy=float(balanced_acc),
+        mcc=float(mcc),
+        auc_roc=float(auc_roc),
+        expectancy=float(expectancy),
+        skipped_folds=skipped_folds,
     )
 
 

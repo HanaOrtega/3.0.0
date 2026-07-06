@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 
 from src.backtest import run_backtest
 from src.baselines import BASELINES, run_baseline_backtest
+from src.macro import DEFAULT_BENCHMARK, derive_market_regime_features
 from src.quality import DataQualityError, validate_ohlcv
 
 from .common import cached_fetch_ohlcv
@@ -63,6 +64,16 @@ def render():
         max_drawdown_halt = col14.number_input("Kill-switch: max obsunięcie", min_value=0.05, max_value=0.90, value=0.25, step=0.05, key="bt_dd_halt")
         loss_streak_halt = col15.number_input("Kill-switch: seria strat", min_value=2, max_value=20, value=5, key="bt_loss_halt")
 
+        col16, col17 = st.columns(2)
+        sizing_mode = col16.selectbox(
+            "Sposób wyznaczania SL/TP", ["quantile", "atr"], index=0, key="bt_sizing_mode",
+            help="'quantile': z rozrzutu prognozy P10/P90 (z podłogą ATR); 'atr': stałe wielokrotności ATR",
+        )
+        benchmark = col17.text_input(
+            "Indeks referencyjny (cechy reżimu rynku, puste = wyłącz)",
+            value=DEFAULT_BENCHMARK, key="bt_benchmark",
+        )
+
     compare_baselines = st.checkbox("Porównaj z prostymi strategiami bazowymi (turtle/sma/contrarian)", key="bt_compare")
 
     if not st.button("Uruchom backtest", type="primary", key="bt_run"):
@@ -83,15 +94,24 @@ def render():
         st.error(str(exc))
         return
 
+    market_regime = None
+    if benchmark:
+        try:
+            with st.spinner(f"Pobieranie indeksu referencyjnego {benchmark}..."):
+                benchmark_df = cached_fetch_ohlcv(benchmark, period, interval)
+            market_regime = derive_market_regime_features(benchmark_df)
+        except (ValueError, ConnectionError) as exc:
+            st.warning(f"Nie udało się pobrać indeksu referencyjnego ({exc}) - pomijam cechy reżimu rynku.")
+
     results = {}
 
     with st.spinner("Trenowanie i symulacja sygnału ML (może potrwać kilka minut)..."):
         bt_ml, stats_ml = run_backtest(
             df, horizon=horizon, atr_mult=atr_mult, retrain_every=retrain_every,
             train_window=train_window, min_confidence=min_confidence, risk_pct=risk_pct,
-            sl_atr_mult=sl_atr_mult, tp_atr_mult=tp_atr_mult,
+            sl_atr_mult=sl_atr_mult, tp_atr_mult=tp_atr_mult, sizing_mode=sizing_mode,
             max_drawdown_halt=max_drawdown_halt, loss_streak_halt=loss_streak_halt,
-            cash=cash, commission=commission,
+            market_regime=market_regime, cash=cash, commission=commission,
         )
     results["ML (ensemble)"] = stats_ml
 

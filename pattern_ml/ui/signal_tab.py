@@ -4,6 +4,7 @@ import numpy as np
 import streamlit as st
 
 from src.features import MAX_INDICATOR_LOOKBACK, build_feature_matrix
+from src.macro import DEFAULT_BENCHMARK, derive_market_regime_features
 from src.model import predict_latest, predict_price_path, train_model, train_quantile_models
 from src.plotting import plot_chart
 from src.quality import DataQualityError, validate_ohlcv
@@ -40,6 +41,11 @@ def render():
             label += f" (uwaga: zebrany dla {st.session_state['sentiment_ticker']}, nie {ticker})"
         use_sentiment = st.checkbox(label, value=same_ticker, key="signal_use_sentiment")
 
+    benchmark = st.text_input(
+        "Indeks referencyjny (cechy reżimu rynku, puste = wyłącz)",
+        value=DEFAULT_BENCHMARK, key="signal_benchmark",
+    )
+
     if not st.button("Uruchom analizę", type="primary", key="signal_run"):
         return
 
@@ -62,14 +68,25 @@ def render():
 
     sentiment_df = st.session_state["sentiment_df"] if use_sentiment else None
 
+    market_regime = None
+    if benchmark:
+        try:
+            with st.spinner(f"Pobieranie indeksu referencyjnego {benchmark}..."):
+                benchmark_df = cached_fetch_ohlcv(benchmark, period, interval)
+            market_regime = derive_market_regime_features(benchmark_df)
+        except (ValueError, ConnectionError) as exc:
+            st.warning(f"Nie udało się pobrać indeksu referencyjnego ({exc}) - pomijam cechy reżimu rynku.")
+
     with st.spinner("Liczenie wskaźników i trenowanie modelu ML..."):
         features, pat, X, y, y_reg, feature_cols = build_feature_matrix(
-            df, horizon=horizon, atr_mult=atr_mult, sentiment=sentiment_df
+            df, horizon=horizon, atr_mult=atr_mult, sentiment=sentiment_df, market_regime=market_regime
         )
         if len(X) < 100:
             st.warning(f"Tylko {len(X)} próbek treningowych - rozważ dłuższy okres danych.")
 
-        result = train_model(X, y, gap=horizon, embargo=MAX_INDICATOR_LOOKBACK)
+        result = train_model(X, y, gap=horizon, embargo=MAX_INDICATOR_LOOKBACK, y_reg=y_reg)
+        if result.skipped_folds:
+            st.info(f"Pominięto {result.skipped_folds} fold(y) walidacji krzyżowej - za mało zróżnicowanych klas.")
 
         if manual_confidence is not None:
             min_confidence = manual_confidence
@@ -101,14 +118,25 @@ def render():
     st.pyplot(fig, clear_figure=True)
 
     with st.expander("Szczegóły modelu (walidacja krzyżowa, ważność cech)"):
-        col_d, col_e = st.columns(2)
-        col_d.metric("Trafność CV (walidacja krzyżowa szeregu czasowego)", f"{result.cv_accuracy * 100:.1f}%")
+        col_d, col_e, col_f = st.columns(3)
+        col_d.metric("Trafność CV", f"{result.cv_accuracy * 100:.1f}%")
+        col_e.metric("Trafność zbalansowana", f"{result.balanced_accuracy * 100:.1f}%",
+                     help="Odporna na przewagę liczebną klasy NEUTRALNY, w przeciwieństwie do zwykłej trafności")
+        col_f.metric("MCC", f"{result.mcc:.2f}", help="Matthews Correlation Coefficient, zakres -1..1")
+
+        col_g, col_h = st.columns(2)
         if not np.isnan(result.recommended_confidence_precision):
-            col_e.metric(
+            col_g.metric(
                 "Zalecany próg pewności (precyzja sygnałów)",
                 f"{result.recommended_confidence * 100:.0f}%",
                 help=f"Szacowana precyzja sygnałów kierunkowych przy tym progu: "
                      f"{result.recommended_confidence_precision * 100:.0f}% (na danych walidacyjnych)",
             )
+        if not np.isnan(result.expectancy):
+            col_h.metric(
+                "Expectancy (śr. zwrot/transakcję)", f"{result.expectancy * 100:+.2f}%",
+                help="Średni zwrot na sygnał kierunkowy przy zalecanym progu pewności, na danych walidacyjnych",
+            )
+
         st.text(result.report)
         st.bar_chart(result.feature_importances.head(10))
