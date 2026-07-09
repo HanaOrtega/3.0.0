@@ -6,7 +6,7 @@
   "maxPerSource": 25,
   "maxTotalArticles": 40,
   "ollamaHost": "http://localhost:11434",
-  "ollamaModel": "llama3.1",
+  "ollamaModel": "llama3",
   "useGoogleNewsRss": true,
   "rssFeeds": [
     "https://feeds.bbci.co.uk/news/business/rss.xml",

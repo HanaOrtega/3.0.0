@@ -28,7 +28,7 @@ pip install -r requirements.txt
 ### Lokalny LLM (Ollama)
 
 1. Zainstaluj Ollama: https://ollama.com/download
-2. Pobierz model (raz): `ollama pull llama3.1` (albo mniejszy, np. `llama3.2` lub `mistral`)
+2. Pobierz model (raz): `ollama pull llama3` (albo inny, np. `llama3.2` lub `mistral`)
 3. Upewnij sie, ze serwer dziala: `ollama serve` (na wielu systemach startuje
    automatycznie jako usluga)
 
@@ -46,7 +46,7 @@ Google News RSS + scrapingu tresci.
 
 ```bash
 python main.py --query "Google" --hours 72
-python main.py --query "Google finanse" --lang pl --model llama3.1
+python main.py --query "Google finanse" --lang pl --model llama3
 python main.py --query "Tesla" --max-articles 20 --no-fulltext
 ```
 
@@ -56,7 +56,7 @@ python main.py --query "Tesla" --max-articles 20 --no-fulltext
 | `--hours`             | ile godzin wstecz brac artykuly                                 | `72`      |
 | `--lang`              | kod jezyka (np. `pl`, `en`)                                     | `pl`      |
 | `--country`           | kod kraju dla Google News/GNews (np. `PL`, `US`)                | `PL`      |
-| `--model`             | nazwa modelu Ollama                                             | `llama3.1`|
+| `--model`             | nazwa modelu Ollama                                             | `llama3`|
 | `--ollama-host`       | adres serwera Ollama                                            | `http://localhost:11434` |
 | `--max-articles`      | maks. liczba artykulow do podsumowania                          | `40`      |
 | `--no-fulltext`       | nie scrapuj pelnej tresci - uzyj tylko opisu z RSS/API (szybsze)| wylaczone |
