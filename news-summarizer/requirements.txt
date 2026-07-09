@@ -1,0 +1,4 @@
+feedparser>=6.0
+requests>=2.31
+trafilatura>=1.8
+python-dateutil>=2.9
