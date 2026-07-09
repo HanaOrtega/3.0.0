@@ -13,5 +13,13 @@
     "https://www.cnbc.com/id/10001147/device/rss/rss.html",
     "https://techcrunch.com/feed/",
     "https://www.investing.com/rss/news_25.rss"
-  ]
+  ],
+  "listingPages": {
+    "Google": [
+      {"url": "https://www.investing.com/equities/google-inc-news", "source": "Investing.com - Google", "maxPages": 2}
+    ],
+    "Apple": [
+      {"url": "https://www.investing.com/equities/apple-computer-inc-news", "source": "Investing.com - Apple", "maxPages": 2}
+    ]
+  }
 }

@@ -1,8 +1,9 @@
 """
 Pobiera newsy z wielu zrodel (statyczne kanaly RSS, Google News RSS, NewsAPI,
-GNews) wraz z pelna trescia artykulow (generyczny scraping stron przez
-trafilatura) i podsumowuje je lokalnym LLM (Ollama) - bez wysylania danych do
-zadnego platnego API do podsumowan.
+GNews, strony z listingiem newsow per-spolka np. investing.com) wraz z pelna
+trescia artykulow (generyczny scraping stron przez trafilatura) i podsumowuje
+je lokalnym LLM (Ollama) - bez wysylania danych do zadnego platnego API do
+podsumowan.
 
 Wymaga uruchomionej Ollama (`ollama serve`) z pobranym modelem, np.:
     ollama pull llama3
@@ -50,6 +51,7 @@ def parse_args():
     p.add_argument("--no-google-news", action="store_true", help="Pomin Google News RSS")
     p.add_argument("--no-newsapi", action="store_true", help="Pomin NewsAPI")
     p.add_argument("--no-gnews", action="store_true", help="Pomin GNews")
+    p.add_argument("--no-listing-pages", action="store_true", help="Pomin strony z listingiem newsow (np. investing.com)")
     return p.parse_args()
 
 
@@ -122,6 +124,12 @@ def collect_articles(query, cfg, args):
             query, lang=cfg["lang"], country=cfg["country"].lower(), limit=cfg["maxPerSource"]
         ))
 
+    if not args.no_listing_pages:
+        pages = (cfg.get("listingPages") or {}).get(query, [])
+        if pages:
+            print(f"Pobieranie stron z listingiem newsow ({len(pages)}) dla '{query}'...")
+            all_articles.extend(sources.fetch_listing_pages(pages, limit=cfg["maxPerSource"]))
+
     return all_articles
 
 
@@ -172,11 +180,23 @@ def process_query(query, cfg, args):
             "Raport zostanie wygenerowany bez podsumowan LLM (tylko opisy ze zrodel)."
         )
 
+    final_articles = []
     for i, a in enumerate(articles, 1):
         print(f"[{i}/{len(articles)}] {a['title'][:80]}")
         full_text = None
         if not args.no_fulltext:
-            full_text = extract.extract_full_text(a["url"])
+            extracted = extract.extract_article(a["url"])
+            full_text = extracted["text"]
+            # Niektore zrodla (np. strony-listingi typu investing.com) nie
+            # podaja daty przy linku - doszacowujemy ja teraz z metadanych
+            # pelnego artykulu i dopiero teraz mozemy odrzucic, jesli jednak
+            # jest spoza zadanego okna czasowego.
+            if not a.get("published") and extracted["published"]:
+                a["published"] = extracted["published"]
+                pub_dt = parse_published(a["published"])
+                if pub_dt is not None and pub_dt < cutoff:
+                    print("  Pomijam - po pobraniu tresci data okazala sie spoza okna czasowego.")
+                    continue
         text_for_summary = full_text or a.get("description") or a["title"]
 
         if llm_available:
@@ -189,6 +209,13 @@ def process_query(query, cfg, args):
                 a["summary"] = a.get("description") or None
         else:
             a["summary"] = a.get("description") or None
+
+        final_articles.append(a)
+
+    articles = final_articles
+    if not articles:
+        print("Brak artykulow spelniajacych kryteria po weryfikacji daty - pomijam ten temat.")
+        return
 
     overall_summary = None
     if llm_available:

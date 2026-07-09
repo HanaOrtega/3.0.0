@@ -4,14 +4,17 @@ Pobieranie surowych wpisow z roznych zrodel newsowych:
 - Google News RSS (wyszukiwanie po hasle, bez klucza API)
 - NewsAPI (https://newsapi.org, wymaga NEWSAPI_KEY)
 - GNews (https://gnews.io, wymaga GNEWS_API_KEY)
+- strony z listingiem newsow danej spolki (np. investing.com/equities/...) -
+  generyczny scraping HTML, bez RSS/API
 """
 import os
 import time
 from datetime import datetime, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 
 import feedparser
 import requests
+from bs4 import BeautifulSoup
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -129,4 +132,144 @@ def fetch_gnews(query, lang="pl", country="pl", limit=25, api_key=None):
             "source": (item.get("source") or {}).get("name") or "GNews",
             "origin": "gnews",
         })
+    return articles
+
+
+def _parse_investing_datetime(value):
+    """Format obserwowany na investing.com: '2026-07-09 19:49:58' (bez strefy - traktujemy jako UTC)."""
+    if not value:
+        return None
+    try:
+        dt = datetime.strptime(value.strip(), "%Y-%m-%d %H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc).isoformat()
+    except ValueError:
+        return None
+
+
+def _extract_investing_articles(soup, base_url, source_name):
+    """
+    Selektory dopasowane do investing.com (strony 'News' danej spolki, np.
+    investing.com/equities/<spolka>-news) - kazdy wpis to
+    article[data-test="article-item"] z linkiem, opisem, data i zrodlem.
+    """
+    articles = []
+    for art in soup.select('article[data-test="article-item"]'):
+        title_link = art.select_one('a[data-test="article-title-link"]')
+        if not title_link:
+            continue
+        href = title_link.get("href") or ""
+        title = title_link.get_text(strip=True)
+        if not href or not title:
+            continue
+
+        desc_el = art.select_one('p[data-test="article-description"]')
+        description = desc_el.get_text(strip=True) if desc_el else ""
+
+        time_el = art.select_one('time[data-test="article-publish-date"]')
+        published = _parse_investing_datetime(time_el.get("datetime")) if time_el else None
+
+        provider_el = art.select_one('a[data-test="article-provider-link"]')
+        provider = provider_el.get_text(strip=True) if provider_el else (source_name or "Investing.com")
+
+        articles.append({
+            "title": title,
+            "url": urljoin(base_url, href),
+            "published": published,
+            "description": description,
+            "source": provider,
+            "origin": "scrape",
+        })
+    return articles
+
+
+def _extract_generic_articles(soup, base_url, source_name):
+    """Fallback dla stron o innej strukturze niz investing.com - defensywne selektory."""
+    articles = []
+    name = source_name or base_url
+    seen = set()
+
+    for selector in ("a.title[href]", "article a[href]", 'a[href*="/news/"]'):
+        links = soup.select(selector)
+        if not links:
+            continue
+        for link in links:
+            href = link.get("href") or ""
+            text = link.get_text(strip=True)
+            if not href or not text or len(text) < 15:
+                continue
+            full_url = urljoin(base_url, href)
+            if full_url in seen:
+                continue
+            seen.add(full_url)
+            articles.append({
+                "title": text,
+                "url": full_url,
+                "published": None,
+                "description": "",
+                "source": name,
+                "origin": "scrape",
+            })
+        if articles:
+            break
+    return articles
+
+
+def fetch_listing_page(url, source_name=None, limit=25, max_pages=1):
+    """
+    Scraper strony z lista newsow danej spolki (np. investing.com/equities/
+    <spolka>-news) - bez RSS/API. Probuje najpierw selektorow dopasowanych do
+    investing.com, a jesli nie znajdzie nic pasujacego (inny serwis), spada
+    do generycznej heurystyki. `max_pages` > 1 pobiera kolejne strony
+    (investing.com uzywa wzorca .../<spolka>-news/2, /3, ...).
+    """
+    articles = []
+    seen_urls = set()
+
+    for page_num in range(1, max_pages + 1):
+        page_url = url if page_num == 1 else f"{url.rstrip('/')}/{page_num}"
+        try:
+            resp = requests.get(
+                page_url,
+                headers={"User-Agent": USER_AGENT, "Accept-Language": "pl,en;q=0.8"},
+                timeout=15,
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            print(f"  [Listing] Blad pobierania {page_url}: {e}")
+            break
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        page_articles = _extract_investing_articles(soup, page_url, source_name)
+        if not page_articles:
+            page_articles = _extract_generic_articles(soup, page_url, source_name)
+
+        new_count = 0
+        for a in page_articles:
+            if a["url"] in seen_urls:
+                continue
+            seen_urls.add(a["url"])
+            articles.append(a)
+            new_count += 1
+
+        if new_count == 0 or len(articles) >= limit:
+            break
+
+    return articles[:limit]
+
+
+def fetch_listing_pages(pages, limit=25):
+    """pages: lista {"url": ..., "source": ..., "maxPages": ...} (lub samych URL-i)."""
+    articles = []
+    for page in pages:
+        if isinstance(page, dict):
+            url = page.get("url")
+            source_name = page.get("source")
+            max_pages = page.get("maxPages", 1)
+        else:
+            url = page
+            source_name = None
+            max_pages = 1
+        if not url:
+            continue
+        articles.extend(fetch_listing_page(url, source_name=source_name, limit=limit, max_pages=max_pages))
     return articles

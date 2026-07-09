@@ -18,6 +18,7 @@ porada inwestycyjna**.
 | Google News RSS     | nie                | dynamiczne wyszukiwanie po `--query`, bez limitow |
 | NewsAPI             | tak (`NEWSAPI_KEY`) | pomijane automatycznie, jesli brak klucza |
 | GNews               | tak (`GNEWS_API_KEY`) | pomijane automatycznie, jesli brak klucza |
+| Strony z listingiem newsow per-spolka | nie | np. `investing.com/equities/<spolka>-news` - lista w `config/default.json` (`listingPages`), przypisana do konkretnego tematu z `queries` |
 | Pelna tresc artykulu | nie               | generyczny scraping kazdego znalezionego linku (trafilatura) |
 
 ## Instalacja
@@ -71,6 +72,30 @@ Liste tematow edytujesz bezposrednio w `config/default.json`:
 "queries": ["Google", "Apple", "Tesla"],
 ```
 
+### Strony z listingiem newsow per-spolka (np. investing.com)
+
+Opcjonalnie, dla kazdego tematu z `queries` mozesz podpiac strone z lista
+newsow tej konkretnej spolki (np. `investing.com/equities/<spolka>-news`) -
+program przeczyta z niej linki do artykulow (bez RSS/API) i doda je do puli.
+Konfiguruje sie to w `config/default.json` pod kluczem `listingPages`,
+osobno dla kazdego tematu:
+
+```json
+"listingPages": {
+  "Google": [
+    {"url": "https://www.investing.com/equities/google-inc-news", "source": "Investing.com - Google"}
+  ],
+  "Apple": [
+    {"url": "https://www.investing.com/equities/apple-computer-inc-news", "source": "Investing.com - Apple"}
+  ]
+}
+```
+
+Klucz w `listingPages` musi dokladnie odpowiadac wartosci z `queries`. Daty
+publikacji dla tych wpisow sa doszacowywane pozniej z metadanych pelnego
+artykulu (listing zwykle ich nie pokazuje) - jesli po doszacowaniu artykul
+okaze sie starszy niz `--hours`, zostaje odrzucony.
+
 | Flaga               | Opis                                                         | Domyslnie |
 |----------------------|----------------------------------------------------------------|-----------|
 | `--query`            | pojedynczy temat/haslo - nadpisuje liste `queries` z configu   | (lista z configu) |
@@ -81,7 +106,7 @@ Liste tematow edytujesz bezposrednio w `config/default.json`:
 | `--ollama-host`       | adres serwera Ollama                                            | `http://localhost:11434` |
 | `--max-articles`      | maks. liczba artykulow do podsumowania                          | `40`      |
 | `--no-fulltext`       | nie scrapuj pelnej tresci - uzyj tylko opisu z RSS/API (szybsze)| wylaczone |
-| `--no-rss` / `--no-google-news` / `--no-newsapi` / `--no-gnews` | wylacz dane zrodlo | wszystkie wlaczone |
+| `--no-rss` / `--no-google-news` / `--no-newsapi` / `--no-gnews` / `--no-listing-pages` | wylacz dane zrodlo | wszystkie wlaczone |
 
 Domyslne kanaly RSS i inne ustawienia mozna tez na stale zmienic w
 `config/default.json`.
@@ -107,6 +132,12 @@ Domyslne kanaly RSS i inne ustawienia mozna tez na stale zmienic w
 - Scraping pelnej tresci (`trafilatura`) czyta strukture HTML docelowych stron,
   wiec dla niektorych serwisow (paywalle, mocna ochrona anty-botowa) moze sie
   nie udac - wtedy uzywany jest opis z RSS/API jako fallback.
+- Scraping stron-listingow (`listingPages`, np. investing.com) rowniez czyta
+  surowy HTML zwyklym requestem (bez przegladarki) - jesli dany serwis blokuje
+  automatyczne zapytania (403, strona-wyzwanie/CAPTCHA), selektory w
+  `sources.py` (funkcja `fetch_listing_page`) moga wymagac dostrojenia albo,
+  w ostatecznosci, przejscia na scraping przez prawdziwa przegladarke
+  (analogicznie do `x-finance-scraper` w tym repo).
 - Przy duzej liczbie artykulow generowanie podsumowan lokalnym LLM moze
   potrwac dlugo (zalezy od mocy komputera i wielkosci modelu) - zacznij od
   mniejszego `--max-articles`, jesli chcesz szybko przetestowac.
