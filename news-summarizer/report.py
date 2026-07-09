@@ -11,6 +11,12 @@ def write_markdown_report(path, query, hours_back, overall_summary, articles):
             f"- okno czasowe: ostatnie {hours_back}h - liczba artykulow: {len(articles)}_"
         ),
         "",
+        (
+            "> **Uwaga:** oceny wplywu na kurs akcji ponizej sa automatycznie "
+            "generowane przez lokalny LLM na podstawie tresci newsow i **nie "
+            "stanowia porady inwestycyjnej**."
+        ),
+        "",
         "## Podsumowanie zbiorcze",
         "",
         overall_summary or "_(brak - LLM niedostepny lub brak artykulow z podsumowaniem)_",

@@ -39,13 +39,18 @@ def _chat(host, model, prompt, timeout=DEFAULT_TIMEOUT):
         raise OllamaError(str(e)) from e
 
 
-def summarize_article(host, model, title, text, lang="pl"):
+def summarize_article(host, model, title, text, query, lang="pl"):
     body = (text or "")[:6000]
     lang_name = "polskim" if lang == "pl" else lang
     prompt = (
         f"Podsumuj ponizszy artykul w jezyku {lang_name} w 2-4 zdaniach, "
         "konkretnie i bez lania wody. Skup sie na faktach (liczby, decyzje, "
-        "nazwy firm/osob), pomijaj wstep reklamowy i nawigacje strony.\n\n"
+        "nazwy firm/osob), pomijaj wstep reklamowy i nawigacje strony. "
+        f"Na koniec dodaj jedno zdanie zaczynajace sie od 'Wplyw na kurs akcji "
+        f"{query}:' oceniajace, czy ta informacja jest raczej pozytywna, "
+        "negatywna czy neutralna dla kierunku ceny akcji, z krotkim "
+        "uzasadnieniem. Jesli artykul nie dotyczy bezposrednio finansow/gieldy, "
+        "napisz 'Wplyw na kurs akcji: brak bezposredniego zwiazku'.\n\n"
         f"Tytul: {title}\n\nTresc:\n{body}"
     )
     return _chat(host, model, prompt)
@@ -56,10 +61,16 @@ def summarize_digest(host, model, article_summaries, query, lang="pl"):
     joined = "\n".join(f"- {a['title']} ({a['source']}): {a['summary']}" for a in article_summaries)
     prompt = (
         f"Ponizej jest lista {len(article_summaries)} podsumowan artykulow "
-        f"na temat '{query}' z ostatnich godzin. Napisz zwiezle podsumowanie "
-        f"zbiorcze (5-8 zdan) w jezyku {lang_name}: co sie dzieje, jakie sa "
+        f"(kazde zawiera tez ocene wplywu na kurs akcji) na temat '{query}' "
+        f"z ostatnich godzin. Napisz w jezyku {lang_name}:\n"
+        "1) Zwiezle podsumowanie zbiorcze (5-8 zdan): co sie dzieje, jakie sa "
         "najwazniejsze i powtarzajace sie watki, czy pojawiaja sie sprzeczne "
-        "informacje miedzy zrodlami.\n\n"
+        "informacje miedzy zrodlami.\n"
+        f"2) Osobny akapit 'Ocena wplywu na kierunek cen akcji {query}:' - na "
+        "podstawie wszystkich powyzszych ocen okresl ogolny sentyment "
+        "(pozytywny / negatywny / neutralny / mieszany) i krotko uzasadnij "
+        "(2-3 zdania). Wyraznie zaznacz, ze to automatyczna analiza newsow, a "
+        "nie porada inwestycyjna.\n\n"
         f"{joined}"
     )
     return _chat(host, model, prompt)

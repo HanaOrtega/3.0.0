@@ -1,5 +1,5 @@
 {
-  "query": "Google",
+  "queries": ["Google", "Apple"],
   "hoursBack": 72,
   "lang": "pl",
   "country": "PL",

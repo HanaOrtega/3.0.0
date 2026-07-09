@@ -5,11 +5,16 @@ trafilatura) i podsumowuje je lokalnym LLM (Ollama) - bez wysylania danych do
 zadnego platnego API do podsumowan.
 
 Wymaga uruchomionej Ollama (`ollama serve`) z pobranym modelem, np.:
-    ollama pull llama3.1
+    ollama pull llama3
+
+Tematy do przetworzenia bierze domyslnie z `config/default.json` (klucz
+"queries" - lista, np. ["Google", "Apple"]) - dla kazdego tematu z listy
+generowany jest osobny raport. Flaga --query nadpisuje liste i przetwarza
+tylko jeden, podany temat.
 
 Uzycie:
-    python main.py --query "Google" --hours 72
-    python main.py --query "Google finanse" --lang pl --model llama3.1
+    python main.py                              # wszystkie tematy z config/default.json
+    python main.py --query "Google" --hours 72   # tylko jeden, wskazany temat
     python main.py --query "Tesla" --max-articles 20 --no-fulltext
 """
 import argparse
@@ -33,7 +38,7 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Pobieranie i podsumowywanie newsow z wielu zrodel przy uzyciu lokalnego LLM."
     )
-    p.add_argument("--query", type=str, help="Temat/haslo wyszukiwania")
+    p.add_argument("--query", type=str, help="Temat/haslo wyszukiwania (nadpisuje liste 'queries' z configu)")
     p.add_argument("--hours", type=float, help="Ile godzin wstecz brac artykuly")
     p.add_argument("--lang", type=str, help="Kod jezyka (np. pl, en)")
     p.add_argument("--country", type=str, help="Kod kraju (np. PL, US) - dla Google News/GNews")
@@ -52,8 +57,6 @@ def load_config(args):
     with open(DEFAULT_CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
-    if args.query:
-        cfg["query"] = args.query
     if args.hours is not None:
         cfg["hoursBack"] = args.hours
     if args.lang:
@@ -67,6 +70,17 @@ def load_config(args):
     if args.max_articles:
         cfg["maxTotalArticles"] = args.max_articles
     return cfg
+
+
+def resolve_queries(cfg, args):
+    if args.query:
+        return [args.query]
+    queries = cfg.get("queries")
+    if queries:
+        return queries
+    if cfg.get("query"):
+        return [cfg["query"]]
+    return []
 
 
 def normalize_url(url):
@@ -85,7 +99,7 @@ def parse_published(value):
         return None
 
 
-def collect_articles(cfg, args):
+def collect_articles(query, cfg, args):
     all_articles = []
 
     if not args.no_rss:
@@ -95,17 +109,17 @@ def collect_articles(cfg, args):
     if not args.no_google_news and cfg.get("useGoogleNewsRss", True):
         print("Pobieranie Google News RSS...")
         all_articles.extend(sources.fetch_google_news_rss(
-            cfg["query"], lang=cfg["lang"], country=cfg["country"], limit=cfg["maxPerSource"]
+            query, lang=cfg["lang"], country=cfg["country"], limit=cfg["maxPerSource"]
         ))
 
     if not args.no_newsapi:
         print("Pobieranie z NewsAPI (jesli ustawiony NEWSAPI_KEY)...")
-        all_articles.extend(sources.fetch_newsapi(cfg["query"], lang=cfg["lang"], limit=cfg["maxPerSource"]))
+        all_articles.extend(sources.fetch_newsapi(query, lang=cfg["lang"], limit=cfg["maxPerSource"]))
 
     if not args.no_gnews:
         print("Pobieranie z GNews (jesli ustawiony GNEWS_API_KEY)...")
         all_articles.extend(sources.fetch_gnews(
-            cfg["query"], lang=cfg["lang"], country=cfg["country"].lower(), limit=cfg["maxPerSource"]
+            query, lang=cfg["lang"], country=cfg["country"].lower(), limit=cfg["maxPerSource"]
         ))
 
     return all_articles
@@ -133,16 +147,11 @@ def dedupe_and_filter(articles, cutoff):
     return result
 
 
-def main():
-    args = parse_args()
-    cfg = load_config(args)
-
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
+def process_query(query, cfg, args):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=cfg["hoursBack"])
-    print(f"Temat: {cfg['query']} | okno czasowe: ostatnie {cfg['hoursBack']}h")
+    print(f"\n=== Temat: {query} | okno czasowe: ostatnie {cfg['hoursBack']}h ===")
 
-    raw_articles = collect_articles(cfg, args)
+    raw_articles = collect_articles(query, cfg, args)
     print(f"Pobrano lacznie {len(raw_articles)} wpisow (przed deduplikacja i filtrem czasu).")
 
     articles = dedupe_and_filter(raw_articles, cutoff)
@@ -150,7 +159,7 @@ def main():
     print(f"Po deduplikacji i filtrze czasu: {len(articles)} artykulow.")
 
     if not articles:
-        print("Brak artykulow spelniajacych kryteria - konczenie.")
+        print("Brak artykulow spelniajacych kryteria - pomijam ten temat.")
         return
 
     host = cfg["ollamaHost"]
@@ -173,7 +182,7 @@ def main():
         if llm_available:
             try:
                 a["summary"] = summarize.summarize_article(
-                    host, model, a["title"], text_for_summary, lang=cfg["lang"]
+                    host, model, a["title"], text_for_summary, query, lang=cfg["lang"]
                 )
             except summarize.OllamaError as e:
                 print(f"  Blad LLM: {e}")
@@ -187,24 +196,41 @@ def main():
         if summarized:
             try:
                 overall_summary = summarize.summarize_digest(
-                    host, model, summarized, cfg["query"], lang=cfg["lang"]
+                    host, model, summarized, query, lang=cfg["lang"]
                 )
             except summarize.OllamaError as e:
                 print(f"Blad generowania podsumowania zbiorczego: {e}")
 
     stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    safe_query = "".join(c if c.isalnum() else "-" for c in cfg["query"]).strip("-").lower() or "query"
+    safe_query = "".join(c if c.isalnum() else "-" for c in query).strip("-").lower() or "query"
     md_path = os.path.join(OUTPUT_DIR, f"news-{safe_query}-{stamp}.md")
     json_path = os.path.join(OUTPUT_DIR, f"news-{safe_query}-{stamp}.json")
 
-    report.write_markdown_report(md_path, cfg["query"], cfg["hoursBack"], overall_summary, articles)
+    report.write_markdown_report(md_path, query, cfg["hoursBack"], overall_summary, articles)
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(
-            {"query": cfg["query"], "overall_summary": overall_summary, "articles": articles},
+            {"query": query, "overall_summary": overall_summary, "articles": articles},
             f, ensure_ascii=False, indent=2,
         )
 
-    print(f"\nZapisano raport do:\n  {md_path}\n  {json_path}")
+    print(f"Zapisano raport do:\n  {md_path}\n  {json_path}")
+
+
+def main():
+    args = parse_args()
+    cfg = load_config(args)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    queries = resolve_queries(cfg, args)
+    if not queries:
+        print(
+            'Brak zdefiniowanych tematow - dodaj "queries": ["Google", "Apple"] '
+            "do config/default.json albo uzyj --query."
+        )
+        return
+
+    for query in queries:
+        process_query(query, cfg, args)
 
 
 if __name__ == "__main__":

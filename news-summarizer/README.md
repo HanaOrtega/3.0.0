@@ -1,10 +1,14 @@
 # news-summarizer
 
-Program w Pythonie, ktory pobiera newsy na zadany temat z **wielu zrodel**
-(statyczne kanaly RSS, Google News RSS, opcjonalnie NewsAPI i GNews, oraz
-generyczny scraping pelnej tresci kazdego artykulu z dowolnej strony) i
-generuje **podsumowanie przy uzyciu lokalnego LLM** (Ollama - dane nie sa
-wysylane do zadnego platnego API do podsumowan).
+Program w Pythonie, ktory pobiera newsy na zadane tematy (np. spolki gieldowe)
+z **wielu zrodel** (statyczne kanaly RSS, Google News RSS, opcjonalnie
+NewsAPI i GNews, oraz generyczny scraping pelnej tresci kazdego artykulu z
+dowolnej strony) i generuje **podsumowanie przy uzyciu lokalnego LLM**
+(Ollama - dane nie sa wysylane do zadnego platnego API do podsumowan).
+Podsumowanie kazdego artykulu i podsumowanie zbiorcze zawieraja tez ocene
+LLM, jaki dana informacja moze miec wplyw na kierunek cen akcji (pozytywny /
+negatywny / neutralny) - to automatyczna analiza sentymentu newsow, **nie
+porada inwestycyjna**.
 
 ## Zrodla danych
 
@@ -44,15 +48,32 @@ Google News RSS + scrapingu tresci.
 
 ## Uzycie
 
+Domyslnie program przetwarza **liste tematow z pliku konfiguracyjnego**
+`config/default.json` (klucz `"queries"`, np. `["Google", "Apple"]`) i dla
+kazdego z nich generuje osobny raport:
+
+```bash
+python main.py
+```
+
+Zeby przetworzyc tylko jeden, wybrany temat (ignorujac liste z configu), uzyj
+`--query`:
+
 ```bash
 python main.py --query "Google" --hours 72
 python main.py --query "Google finanse" --lang pl --model llama3
 python main.py --query "Tesla" --max-articles 20 --no-fulltext
 ```
 
+Liste tematow edytujesz bezposrednio w `config/default.json`:
+
+```json
+"queries": ["Google", "Apple", "Tesla"],
+```
+
 | Flaga               | Opis                                                         | Domyslnie |
 |----------------------|----------------------------------------------------------------|-----------|
-| `--query`            | temat/haslo wyszukiwania                                        | `Google`  |
+| `--query`            | pojedynczy temat/haslo - nadpisuje liste `queries` z configu   | (lista z configu) |
 | `--hours`             | ile godzin wstecz brac artykuly                                 | `72`      |
 | `--lang`              | kod jezyka (np. `pl`, `en`)                                     | `pl`      |
 | `--country`           | kod kraju dla Google News/GNews (np. `PL`, `US`)                | `PL`      |
@@ -72,10 +93,12 @@ Domyslne kanaly RSS i inne ustawienia mozna tez na stale zmienic w
 2. Deduplikuje po URL/tytule i odrzuca wpisy starsze niz `--hours`.
 3. Dla kazdego artykulu probuje pobrac pelna tresc ze strony (trafilatura) -
    jesli sie nie uda, uzywa opisu z RSS/API.
-4. Kazdy artykul jest podsumowywany osobno przez lokalny LLM (Ollama), a
-   nastepnie ze wszystkich podsumowan powstaje jedno podsumowanie zbiorcze.
-5. Wynik trafia do `output/news-<temat>-<timestamp>.md` (czytelny raport) oraz
-   `.json` (surowe dane).
+4. Kazdy artykul jest podsumowywany osobno przez lokalny LLM (Ollama) wraz z
+   ocena mozliwego wplywu na kierunek ceny akcji, a nastepnie ze wszystkich
+   podsumowan powstaje jedno podsumowanie zbiorcze z ogolna ocena sentymentu.
+5. Dla kazdego tematu wynik trafia osobno do
+   `output/news-<temat>-<timestamp>.md` (czytelny raport) oraz `.json`
+   (surowe dane).
 
 ## Uwagi
 
