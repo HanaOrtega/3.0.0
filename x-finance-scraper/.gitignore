@@ -1,4 +1,6 @@
-node_modules/
 auth/
 output/
-*.log
+__pycache__/
+*.pyc
+.venv/
+venv/
