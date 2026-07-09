@@ -1,0 +1,24 @@
+{
+  "query": "Google",
+  "keywords": [
+    "finance",
+    "finanse",
+    "earnings",
+    "wyniki finansowe",
+    "stock",
+    "akcje",
+    "shares",
+    "revenue",
+    "przychody",
+    "wall street",
+    "gielda",
+    "investors",
+    "inwestorzy"
+  ],
+  "hoursBack": 72,
+  "lang": "",
+  "excludeReplies": true,
+  "maxTweets": 200,
+  "maxScrolls": 60,
+  "strictKeywordFilter": false
+}
