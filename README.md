@@ -13,18 +13,21 @@ trafnosci prognoz na realnych cenach (yfinance) oraz generowania rekomendacji
 
 ```
 market_analyzer/
-  config.py      - konfiguracja (sciezki, Ollama, progi rekomendacji)
-  db.py          - schemat SQLite (news, assets, impact_backtest, recommendations, digests)
-  feeds.py       - wczytywanie listy kanalow RSS z OPML
-  fetch.py       - pobieranie artykulow przez Playwright (ze stealth)
-  extract.py     - ekstrakcja tresci artykulu z HTML
-  companies.py   - wykrywanie spolek/tickerow w tekscie (dopasowanie na granicach slow)
-  llm.py         - analiza newsa przez Ollama (sentyment, kierunek, impact_score)
-  pipeline.py    - pipeline zbierania: RSS -> pobranie -> ekstrakcja -> analiza -> zapis
-  backtest.py    - weryfikacja trafnosci prognoz na realnych cenach (uruchamiane pozniej!)
-  recommend.py   - silnik rekomendacji Kup/Sprzedaj/Trzymaj per ticker
-  digest.py      - dzienny/tygodniowy raport wplywu newsow na rynek
-  dashboard.py   - interfejs Streamlit
+  config.py       - konfiguracja (sciezki, Ollama, progi rekomendacji)
+  db.py           - schemat SQLite (news, assets, impact_backtest, recommendations, digests, signal_calibration)
+  feeds.py        - wczytywanie listy kanalow RSS z OPML
+  fetch.py        - pobieranie artykulow przez Playwright (ze stealth)
+  extract.py      - ekstrakcja tresci artykulu z HTML
+  companies.py    - wykrywanie spolek/tickerow w tekscie (dopasowanie na granicach slow)
+  llm.py          - analiza newsa przez Ollama (sentyment, kierunek, impact, typ zdarzenia)
+  finbert.py      - opcjonalny drugi model sentymentu (ProsusAI/finbert), ensemble z LLM
+  dedupe.py       - klastrowanie tego samego wydarzenia z wielu zrodel (korroboracja)
+  pipeline.py     - pipeline zbierania: RSS -> pobranie -> ekstrakcja -> analiza -> zapis
+  backtest.py     - triple-barrier labeling + alpha vs SPY (uruchamiane pozniej!)
+  calibration.py  - Bayesowskie wagi zaufania (zrodlo/typ zdarzenia/sektor) - "uczenie sie na bledach"
+  recommend.py    - silnik rekomendacji Kup/Sprzedaj/Trzymaj per ticker
+  digest.py       - dzienny/tygodniowy raport wplywu newsow na rynek
+  dashboard.py    - interfejs Streamlit
 data/
   company_map.json      - mapa nazwa spolki -> ticker/gielda/sektor
   investing_feeds.opml  - lista kanalow RSS pogrupowana tematycznie
@@ -96,6 +99,56 @@ Dla kazdego tickera z newsami w ostatnich `RECO_LOOKBACK_DAYS` dniach (domyslnie
 
 Wszystkie progi sa konfigurowalne przez zmienne srodowiskowe (patrz `market_analyzer/config.py`).
 
+Rekomendacje maja tez druga, ostrzejsza warstwe: **"DZIS warto zwrocic uwage"**
+(`recommend.today_highlights()`) - sygnaly z ostatnich 24h, ktore osiagnely
+wyzszy prog score+confidence. To ma odpowiadac wprost na "co dzis kupic/sprzedac",
+odrebnie od wolniejszego, wielodniowego trendu calego tickera.
+
+## Jak system sie uczy na bledach
+
+To byla druga runda pracy nad tym projektem: research podobnych projektow
+open-source i literatury (FinBERT, TauricResearch/TradingAgents, Lopez de Prado
+"Advances in Financial Machine Learning", event-study/news-credibility research)
+pokazal kilka konkretnych, sprawdzonych technik, ktore wbudowalismy:
+
+1. **Triple-barrier labeling** (`backtest.py`) zamiast naiwnego
+   "cena wzrosla po 4h = model mial racje". Zamiast tego stawiamy gorna
+   (profit) i dolna (stop) bariere skalowana do WLASNEJ zmiennosci danego
+   tickera (z ostatnich ~20 dni) oraz barierę czasowa - i sprawdzamy, ktora
+   sciana zostala trafiona pierwsza. To metoda Lopez de Prado, znacznie
+   trudniejszy i uczciwszy test niz sztywny prog procentowy.
+
+2. **Alpha vs SPY** (`backtest.py`) - zwrot tickera jest porownywany do
+   zwrotu benchmarku (SPY) w tym samym oknie czasowym, zeby oddzielic
+   "ten news poruszyl akcje" od "caly rynek tego dnia sie ruszyl" (to jest
+   "trudnosc" wspomniana w wymaganiach - odrozniamy sygnal od szumu rynkowego
+   metoda standardowa w event studies).
+
+3. **Bayesowska kalibracja zaufania** (`calibration.py`) - kazdy rozwiazany
+   backtest aktualizuje rozklad Beta-Bernoulli osobno dla: zrodla RSS, typu
+   zdarzenia (earnings/M&A/regulatory/macro/analyst_rating/product/inne) i
+   sektora. Przyszle rekomendacje sa wazone tymi wyuczonymi wspolczynnikami -
+   zrodlo lub typ newsa, ktory historycznie myli AI, jest automatycznie
+   przycinany. To jest dokladnie mechanizm "uczenia sie na bledach": system
+   nie ma pamieci per-artykul, ale ma trwala, ciagle aktualizowana ocene
+   "jak bardzo ufac tej kategorii sygnalu" - w duchu mechanizmu
+   refleksji/pamieci z projektu TauricResearch/TradingAgents.
+
+4. **Korroboracja bez efektu echo-chamber** (`dedupe.py`) - artykuly o tym
+   samym wydarzeniu (wykrywane po podobienstwie tytulow) sa klastrowane;
+   kilka niezaleznych zrodel piszacych o tym samym wzmacnia sygnal, ale z
+   malejacym przyrostem (log), zeby jedna sensacyjna wiadomosc powielona
+   przez 5 portali nie zdominowala wyniku.
+
+5. **FinBERT jako drugi model sentymentu** (`finbert.py`, opcjonalny) -
+   ogolne LLM czesto zle oceniaja slowa finansowe ("liability", "exposure"),
+   ktore w jezyku codziennym brzmia negatywnie, a w finansach sa neutralne.
+   Domenowy model (ProsusAI/finbert) jest uzywany jako druga, niezalezna
+   opinia i usredniany z ocena LLM.
+
+Zobacz `python main.py calibration` oraz zakladke **"Uczenie sie / Kalibracja"**
+w dashboardzie, zeby zobaczyc aktualny stan wyuczonych wag.
+
 ## Konfiguracja (zmienne srodowiskowe)
 
 | Zmienna | Domyslnie | Opis |
@@ -106,3 +159,12 @@ Wszystkie progi sa konfigurowalne przez zmienne srodowiskowe (patrz `market_anal
 | `MARKET_BACKTEST_MIN_AGE_HOURS` | `24` | jak stary musi byc news, zeby policzyc backtest |
 | `MARKET_RECO_LOOKBACK_DAYS` | `7` | okno newsow branych pod uwage w rekomendacji |
 | `MARKET_RECO_BUY_THRESHOLD` / `MARKET_RECO_SELL_THRESHOLD` | `0.35` / `-0.35` | progi decyzji |
+
+## Opcjonalnie: FinBERT
+
+```bash
+pip install -r requirements-optional.txt
+```
+
+Bez tego system dziala normalnie - `finbert.py` po prostu nie dostarcza
+drugiej opinii, a `recommend.py` korzysta wylacznie z sentymentu LLM.

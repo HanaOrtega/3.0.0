@@ -8,21 +8,27 @@ from datetime import datetime
 import feedparser
 from playwright.sync_api import sync_playwright
 
-from . import companies, config, extract, fetch, llm
+from . import companies, config, dedupe, extract, fetch, llm
 from .db import get_db
 
 
-def save_news(title, url, content, analysis, category):
+def save_news(title, url, content, analysis, category, feed_group):
     db = get_db()
     cur = db.cursor()
     url_hash = hashlib.md5(url.encode()).hexdigest()
+    event_type = llm.get_event_type(analysis)
+    time_horizon = llm.get_time_horizon_hours(analysis)
     try:
         cur.execute(
             """
-            INSERT INTO news (hash, date, title, url, content, analysis, category)
-            VALUES (?,?,?,?,?,?,?)
+            INSERT INTO news (hash, date, title, url, content, analysis, category,
+                               feed_group, event_type, time_horizon_hours)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
             """,
-            (url_hash, datetime.now().isoformat(), title, url, content, analysis, category),
+            (
+                url_hash, datetime.now().isoformat(), title, url, content, analysis,
+                category, feed_group, event_type, time_horizon,
+            ),
         )
         db.commit()
         return cur.lastrowid
@@ -32,14 +38,15 @@ def save_news(title, url, content, analysis, category):
         raise
 
 
-def save_assets(news_id, assets):
+def save_assets(news_id, assets, title, news_date=None):
     db = get_db()
     cur = db.cursor()
     for asset in assets:
+        cluster = dedupe.assign_event_cluster(asset["ticker"], title, news_date)
         cur.execute(
             """
-            INSERT INTO assets (news_id, company, ticker, exchange, sector, confidence)
-            VALUES (?,?,?,?,?,?)
+            INSERT INTO assets (news_id, company, ticker, exchange, sector, confidence, event_cluster)
+            VALUES (?,?,?,?,?,?,?)
             """,
             (
                 news_id,
@@ -48,6 +55,7 @@ def save_assets(news_id, assets):
                 asset["exchange"],
                 asset.get("sector", ""),
                 asset["confidence"],
+                cluster,
             ),
         )
     db.commit()
@@ -84,6 +92,7 @@ def run_pipeline():
         for feed_info in feed_list:
             rss_url = feed_info["url"]
             category = feed_info["name"]
+            feed_group = feed_info.get("group", "General")
 
             print("\nRSS:", category)
 
@@ -114,7 +123,7 @@ def run_pipeline():
 
                 analysis = llm.analyze_article(text)
 
-                news_id = save_news(title, url, text, analysis, category)
+                news_id = save_news(title, url, text, analysis, category, feed_group)
                 if not news_id:
                     continue
 
@@ -122,7 +131,7 @@ def run_pipeline():
 
                 assets = companies.detect_assets(text, company_map)
                 if assets:
-                    save_assets(news_id, assets)
+                    save_assets(news_id, assets, title, datetime.now())
                     print("    -> aktywa:", ", ".join(a["ticker"] for a in assets))
 
         browser.close()

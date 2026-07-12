@@ -10,7 +10,7 @@ import json
 import os
 from datetime import datetime, timedelta
 
-from . import config, llm, recommend
+from . import calibration, config, llm, recommend
 from .db import get_db
 
 _PERIOD_HOURS = {"daily": 24, "weekly": 24 * 7}
@@ -95,9 +95,14 @@ def build_digest(period="daily"):
     recos = recommend.generate_recommendations(save=False)
     buy_calls = [r for r in recos if r["action"] == "BUY"]
     sell_calls = [r for r in recos if r["action"] == "SELL"]
+    today_calls = recommend.today_highlights(recos)
+
+    source_calibration = calibration.snapshot("source")
+    event_calibration = calibration.snapshot("event_type")
 
     md = _render_markdown(
-        period, news_rows, by_category, top_stories, sector_breakdown, buy_calls, sell_calls
+        period, news_rows, by_category, top_stories, sector_breakdown,
+        buy_calls, sell_calls, today_calls, source_calibration, event_calibration,
     )
 
     top_movers = {
@@ -111,7 +116,10 @@ def build_digest(period="daily"):
     return md
 
 
-def _render_markdown(period, news_rows, by_category, top_stories, sector_breakdown, buy_calls, sell_calls):
+def _render_markdown(
+    period, news_rows, by_category, top_stories, sector_breakdown,
+    buy_calls, sell_calls, today_calls, source_calibration, event_calibration,
+):
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
     label = "Dzienny" if period == "daily" else "Tygodniowy"
 
@@ -119,6 +127,18 @@ def _render_markdown(period, news_rows, by_category, top_stories, sector_breakdo
     lines.append(f"_{config.DISCLAIMER}_")
     lines.append("")
     lines.append(f"Przeanalizowano **{len(news_rows)}** newsow w tym okresie.")
+    lines.append("")
+
+    lines.append("## Dzis warto zwrocic uwage (sygnaly wysokiej pewnosci, ostatnie 24h)")
+    if today_calls:
+        for r in today_calls:
+            lines.append(
+                f"- **{r['action']} {r['ticker']}** ({r['company']}) — "
+                f"score dzisiaj {r['score_today']:+.2f}, pewnosc {r['confidence']:.2f}, "
+                f"{r['news_count_today']} swiezych newsow"
+            )
+    else:
+        lines.append("- Brak dzis sygnalow spelniajacych wysoki prog pewnosci.")
     lines.append("")
 
     lines.append("## Najwazniejsze wydarzenia")
@@ -169,6 +189,27 @@ def _render_markdown(period, news_rows, by_category, top_stories, sector_breakdo
     for cat, e in sorted(by_category.items(), key=lambda kv: kv[1]["impact_sum"], reverse=True):
         avg = e["impact_sum"] / e["count"] if e["count"] else 0
         lines.append(f"- **{cat}**: {e['count']} newsow, sredni impact {avg:.1f}/10")
+    lines.append("")
+
+    lines.append("## Jak system sie uczy - aktualna kalibracja")
+    lines.append(
+        "_Skutecznosc liczona z rozwiazanych backtestow (triple-barrier vs SPY). "
+        "Nowe zrodla/typy zdarzen startuja od neutralnego priora i doskonala sie z czasem._"
+    )
+    lines.append("")
+    lines.append("**Zrodla RSS:**")
+    if source_calibration:
+        for c in source_calibration[:10]:
+            lines.append(f"- {c['key']}: {c['accuracy']*100:.0f}% (n={c['n']})")
+    else:
+        lines.append("- Brak jeszcze danych.")
+    lines.append("")
+    lines.append("**Typy zdarzen:**")
+    if event_calibration:
+        for c in event_calibration[:10]:
+            lines.append(f"- {c['key']}: {c['accuracy']*100:.0f}% (n={c['n']})")
+    else:
+        lines.append("- Brak jeszcze danych.")
 
     return "\n".join(lines)
 

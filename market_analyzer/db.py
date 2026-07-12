@@ -29,7 +29,10 @@ def init_database():
             url TEXT,
             content TEXT,
             analysis TEXT,
-            category TEXT
+            category TEXT,
+            feed_group TEXT,
+            event_type TEXT,
+            time_horizon_hours REAL
         )
         """
     )
@@ -43,7 +46,8 @@ def init_database():
             ticker TEXT,
             exchange TEXT,
             sector TEXT,
-            confidence REAL
+            confidence REAL,
+            event_cluster TEXT
         )
         """
     )
@@ -63,7 +67,29 @@ def init_database():
             return_24h REAL,
             was_correct INTEGER,
             checked_at TEXT,
+            benchmark_symbol TEXT,
+            benchmark_return_4h REAL,
+            benchmark_return_24h REAL,
+            alpha_4h REAL,
+            alpha_24h REAL,
+            barrier_hit TEXT,
+            label INTEGER,
             UNIQUE(news_id, symbol)
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS signal_calibration (
+            id INTEGER PRIMARY KEY,
+            dimension TEXT,
+            key TEXT,
+            alpha REAL DEFAULT 1.0,
+            beta REAL DEFAULT 1.0,
+            n INTEGER DEFAULT 0,
+            last_updated TEXT,
+            UNIQUE(dimension, key)
         )
         """
     )
@@ -96,7 +122,10 @@ def init_database():
             news_count INTEGER,
             backtest_accuracy REAL,
             rationale TEXT,
-            generated_at TEXT
+            generated_at TEXT,
+            score_today REAL,
+            news_count_today INTEGER,
+            high_conviction_today INTEGER
         )
         """
     )
@@ -115,4 +144,38 @@ def init_database():
         """
     )
 
+    _migrate_existing_tables(db)
     db.commit()
+
+
+# Idempotent ALTER TABLE for databases created before these columns existed.
+_MIGRATIONS = {
+    "news": ["feed_group TEXT", "event_type TEXT", "time_horizon_hours REAL"],
+    "assets": ["event_cluster TEXT"],
+    "impact_backtest": [
+        "benchmark_symbol TEXT",
+        "benchmark_return_4h REAL",
+        "benchmark_return_24h REAL",
+        "alpha_4h REAL",
+        "alpha_24h REAL",
+        "barrier_hit TEXT",
+        "label INTEGER",
+    ],
+    "recommendations": [
+        "score_today REAL",
+        "news_count_today INTEGER",
+        "high_conviction_today INTEGER",
+    ],
+}
+
+
+def _migrate_existing_tables(db):
+    cur = db.cursor()
+    for table, columns in _MIGRATIONS.items():
+        for column_def in columns:
+            column_name = column_def.split()[0]
+            try:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" not in str(e).lower():
+                    raise

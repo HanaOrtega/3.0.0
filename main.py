@@ -6,6 +6,7 @@
 #   python main.py backtest    - liczy skutecznosc AI na newsach starszych niz 24h
 #   python main.py recommend   - generuje rekomendacje Kup/Sprzedaj/Trzymaj
 #   python main.py digest      - generuje dzienny raport wplywu (--period weekly)
+#   python main.py calibration - pokazuje aktualne wagi zaufania (zrodla/typy zdarzen/sektory)
 #   python main.py dashboard   - odpala interfejs Streamlit
 #   python main.py all         - scan + backtest + recommend + digest
 # ============================================================
@@ -27,6 +28,7 @@ def main():
     digest_parser.add_argument("--period", choices=["daily", "weekly"], default="daily")
 
     sub.add_parser("dashboard", help="Uruchom dashboard Streamlit")
+    sub.add_parser("calibration", help="Pokaz aktualne wagi zaufania (samo-ucząca się kalibracja)")
     sub.add_parser("all", help="scan + backtest + recommend + digest")
 
     args = parser.parse_args()
@@ -54,6 +56,13 @@ def main():
     elif args.command == "dashboard":
         print("Uruchom zamiast tego: streamlit run market_analyzer/dashboard.py")
         sys.exit(1)
+
+    elif args.command == "calibration":
+        from market_analyzer import calibration
+        for dimension in ("source", "event_type", "sector"):
+            print(f"\n== {dimension} ==")
+            for row in calibration.snapshot(dimension):
+                print(f"  {row['key']:35s} skutecznosc={row['accuracy']*100:5.1f}%  n={row['n']}")
 
     elif args.command == "all":
         from market_analyzer.pipeline import run_pipeline

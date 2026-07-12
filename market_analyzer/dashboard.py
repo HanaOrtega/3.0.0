@@ -5,7 +5,7 @@ import sqlite3
 
 import pandas as pd
 
-from . import config
+from . import calibration, config
 
 
 def _load_tables():
@@ -29,8 +29,9 @@ def dashboard():
 
     news, assets, backtest, recos, digests = _load_tables()
 
-    tab_overview, tab_reco, tab_digest, tab_news, tab_backtest = st.tabs(
-        ["Przeglad", "Rekomendacje Kup/Sprzedaj", "Raport wplywu", "News", "Skutecznosc AI"]
+    tab_overview, tab_reco, tab_digest, tab_news, tab_backtest, tab_learning = st.tabs(
+        ["Przeglad", "Rekomendacje Kup/Sprzedaj", "Raport wplywu", "News",
+         "Skutecznosc AI", "Uczenie sie / Kalibracja"]
     )
 
     with tab_overview:
@@ -62,6 +63,15 @@ def dashboard():
             latest = latest.sort_values(
                 by="score", key=lambda s: s.abs(), ascending=False
             )
+
+            today_hits = latest[
+                (latest["high_conviction_today"] == 1) & (latest["action"] != "HOLD")
+            ]
+            if len(today_hits):
+                st.warning(
+                    "**Dzis warto zwrocic uwage:** "
+                    + ", ".join(f"{row['action']} {row['ticker']}" for _, row in today_hits.iterrows())
+                )
 
             st.dataframe(
                 latest[
@@ -110,23 +120,55 @@ def dashboard():
             st.plotly_chart(fig, use_container_width=True)
 
             st.subheader("Ranking tickerow")
-            ranking = (
-                backtest.groupby("symbol")
-                .agg(
-                    liczba=("symbol", "count"),
-                    skutecznosc=("was_correct", "mean"),
-                    ruch_4h=("return_4h", "mean"),
-                    ruch_24h=("return_24h", "mean"),
-                )
-                .reset_index()
+            agg_kwargs = dict(
+                liczba=("symbol", "count"),
+                skutecznosc=("was_correct", "mean"),
+                ruch_4h=("return_4h", "mean"),
+                ruch_24h=("return_24h", "mean"),
             )
+            if "alpha_4h" in backtest.columns:
+                agg_kwargs["alpha_4h"] = ("alpha_4h", "mean")
+                agg_kwargs["alpha_24h"] = ("alpha_24h", "mean")
+            ranking = backtest.groupby("symbol").agg(**agg_kwargs).reset_index()
             ranking["skutecznosc"] *= 100
+            st.caption("alpha = ruch tickera minus ruch SPY w tym samym oknie (efekt oczyszczony z ruchu calego rynku)")
             st.dataframe(
                 ranking.sort_values("skutecznosc", ascending=False),
                 use_container_width=True,
             )
         else:
             st.info("Brak wynikow backtestu. Uruchom `python main.py backtest`.")
+
+    with tab_learning:
+        st.subheader("Jak system sie uczy")
+        st.caption(
+            "Kazdy rozwiazany backtest (triple-barrier vs SPY) aktualizuje te wagi. "
+            "Zrodla/typy zdarzen z niska skutecznoscia sa automatycznie obnizane w przyszlych rekomendacjach."
+        )
+
+        source_cal = calibration.snapshot("source")
+        event_cal = calibration.snapshot("event_type")
+        sector_cal = calibration.snapshot("sector")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("**Zrodla RSS**")
+            if source_cal:
+                st.dataframe(pd.DataFrame(source_cal), use_container_width=True)
+            else:
+                st.info("Brak jeszcze danych.")
+        with col2:
+            st.markdown("**Typy zdarzen**")
+            if event_cal:
+                st.dataframe(pd.DataFrame(event_cal), use_container_width=True)
+            else:
+                st.info("Brak jeszcze danych.")
+        with col3:
+            st.markdown("**Sektory**")
+            if sector_cal:
+                st.dataframe(pd.DataFrame(sector_cal), use_container_width=True)
+            else:
+                st.info("Brak jeszcze danych.")
 
 
 if __name__ == "__main__":

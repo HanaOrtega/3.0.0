@@ -1,0 +1,6 @@
+# Opcjonalne: FinBERT jako drugie, niezalezne zrodlo sentymentu (ensemble
+# z ocena LLM), patrz market_analyzer/finbert.py. Ciezkie zaleznosci
+# (~1-2 GB z torch) - system dziala poprawnie bez nich, po prostu bez
+# tego dodatkowego sygnalu.
+transformers
+torch

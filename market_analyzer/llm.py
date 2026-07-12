@@ -21,11 +21,15 @@ Zwroc WYLACZNIE poprawny JSON (bez markdown, bez komentarzy) w formacie:
 "direction": "UP|DOWN|NEUTRAL",
 "impact_score": 0,
 "confidence": 0,
+"event_type": "earnings|merger_acquisition|regulatory|macro|analyst_rating|product|management|other",
+"time_horizon_hours": 24,
 "assets": "lista wspomnianych spolek/tickerow oddzielona przecinkami",
 "reason": "krotkie uzasadnienie oceny"
 }}
 impact_score to liczba 0-10 (0 = brak wplywu na rynek, 10 = bardzo duzy wplyw).
 confidence to liczba 0-1 (pewnosc modelu co do oceny).
+time_horizon_hours to realistyczny czas w godzinach, w ktorym efekt powinien byc widoczny w cenie
+(np. wyniki finansowe: 4-24h, fuzja/przejecie: 4h, decyzja regulatora: 24-72h, dane makro: 24h).
 """
 
 _DEFAULT_ANALYSIS = {
@@ -34,6 +38,8 @@ _DEFAULT_ANALYSIS = {
     "direction": "NEUTRAL",
     "impact_score": 0,
     "confidence": 0,
+    "event_type": "other",
+    "time_horizon_hours": 24,
     "assets": "",
     "reason": "",
 }
@@ -110,3 +116,33 @@ def get_confidence(analysis):
 
 def get_sentiment(analysis):
     return parse_analysis(analysis).get("sentiment", "neutral")
+
+
+def get_event_type(analysis):
+    return parse_analysis(analysis).get("event_type", "other")
+
+
+def get_time_horizon_hours(analysis):
+    try:
+        return float(parse_analysis(analysis).get("time_horizon_hours", 24) or 24)
+    except (TypeError, ValueError):
+        return 24.0
+
+
+SENTIMENT_VALUE = {"positive": 1.0, "neutral": 0.0, "negative": -1.0}
+
+
+def blended_sentiment_value(text, analysis):
+    """Average of the LLM's own sentiment and FinBERT's (when available)
+    into a single -1..1 value. Falls back to the LLM-only value if
+    FinBERT isn't installed - see finbert.py."""
+    from . import finbert
+
+    llm_value = SENTIMENT_VALUE.get(get_sentiment(analysis), 0.0)
+
+    fb = finbert.finbert_sentiment(text)
+    if fb is None:
+        return llm_value, False
+
+    fb_value = SENTIMENT_VALUE.get(fb["label"], 0.0) * fb["score"]
+    return (llm_value + fb_value) / 2.0, True
