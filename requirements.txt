@@ -1,0 +1,10 @@
+requests
+feedparser
+beautifulsoup4
+lxml
+playwright
+playwright-stealth
+yfinance
+pandas
+streamlit
+plotly

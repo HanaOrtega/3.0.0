@@ -1,0 +1,112 @@
+{
+    "Apple": {
+        "ticker": "AAPL",
+        "exchange": "NASDAQ",
+        "sector": "Technology"
+    },
+    "Microsoft": {
+        "ticker": "MSFT",
+        "exchange": "NASDAQ",
+        "sector": "Technology"
+    },
+    "NVIDIA": {
+        "ticker": "NVDA",
+        "exchange": "NASDAQ",
+        "sector": "Semiconductors"
+    },
+    "Tesla": {
+        "ticker": "TSLA",
+        "exchange": "NASDAQ",
+        "sector": "Automotive"
+    },
+    "Amazon": {
+        "ticker": "AMZN",
+        "exchange": "NASDAQ",
+        "sector": "Consumer / E-commerce"
+    },
+    "Meta": {
+        "ticker": "META",
+        "exchange": "NASDAQ",
+        "sector": "Technology"
+    },
+    "Alphabet": {
+        "ticker": "GOOGL",
+        "exchange": "NASDAQ",
+        "sector": "Technology"
+    },
+    "Google": {
+        "ticker": "GOOGL",
+        "exchange": "NASDAQ",
+        "sector": "Technology"
+    },
+    "Broadcom": {
+        "ticker": "AVGO",
+        "exchange": "NASDAQ",
+        "sector": "Semiconductors"
+    },
+    "AMD": {
+        "ticker": "AMD",
+        "exchange": "NASDAQ",
+        "sector": "Semiconductors"
+    },
+    "Intel": {
+        "ticker": "INTC",
+        "exchange": "NASDAQ",
+        "sector": "Semiconductors"
+    },
+    "IBM": {
+        "ticker": "IBM",
+        "exchange": "NYSE",
+        "sector": "Technology"
+    },
+    "Oracle": {
+        "ticker": "ORCL",
+        "exchange": "NYSE",
+        "sector": "Technology"
+    },
+    "Salesforce": {
+        "ticker": "CRM",
+        "exchange": "NYSE",
+        "sector": "Technology"
+    },
+    "JPMorgan": {
+        "ticker": "JPM",
+        "exchange": "NYSE",
+        "sector": "Financials"
+    },
+    "Goldman Sachs": {
+        "ticker": "GS",
+        "exchange": "NYSE",
+        "sector": "Financials"
+    },
+    "Morgan Stanley": {
+        "ticker": "MS",
+        "exchange": "NYSE",
+        "sector": "Financials"
+    },
+    "Bank of America": {
+        "ticker": "BAC",
+        "exchange": "NYSE",
+        "sector": "Financials"
+    },
+    "Berkshire Hathaway": {
+        "ticker": "BRK-B",
+        "exchange": "NYSE",
+        "sector": "Financials / Conglomerate"
+    },
+    "Walmart": {
+        "ticker": "WMT",
+        "exchange": "NYSE",
+        "sector": "Consumer Retail"
+    },
+    "Coca-Cola": {
+        "ticker": "KO",
+        "exchange": "NYSE",
+        "sector": "Consumer Staples"
+    },
+    "McDonald's": {
+        "ticker": "MCD",
+        "exchange": "NYSE",
+        "sector": "Consumer Staples / Restaurants"
+    }
+}

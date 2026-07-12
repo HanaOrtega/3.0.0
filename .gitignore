@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+market_news.db
+html_cache/
+reports/*.md
+.venv/
+venv/

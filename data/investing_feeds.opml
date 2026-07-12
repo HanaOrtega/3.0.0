@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Global Market RSS Terminal CLEAN</title>
+    <dateCreated>2026-07-12</dateCreated>
+  </head>
+  <body>
+    <outline text="Market Movers &amp; Global News" title="Market Movers &amp; Global News">
+      <outline type="rss" text="Associated Press Business" title="Associated Press Business" xmlUrl="https://apnews.com/hub/business/rss"/>
+      <outline type="rss" text="The Economist — Finance" title="The Economist — Finance" xmlUrl="https://www.economist.com/finance-and-economics/rss.xml"/>
+      <outline type="rss" text="The Guardian Business" title="The Guardian Business" xmlUrl="https://www.theguardian.com/business/rss"/>
+      <outline type="rss" text="Politico Economy" title="Politico Economy" xmlUrl="https://www.politico.com/rss/economy.xml"/>
+      <outline type="rss" text="Axios Markets" title="Axios Markets" xmlUrl="https://www.axios.com/feeds/feed.rss"/>
+      <outline type="rss" text="CNBC Markets" title="CNBC Markets" xmlUrl="https://www.cnbc.com/id/10000664/device/rss/rss.html"/>
+      <outline type="rss" text="MarketWatch Top Stories" title="MarketWatch Top Stories" xmlUrl="https://feeds.marketwatch.com/marketwatch/topstories/"/>
+      <outline type="rss" text="Yahoo Finance" title="Yahoo Finance" xmlUrl="https://finance.yahoo.com/news/rssindex"/>
+      <outline type="rss" text="Reuters Markets (Google News)" title="Reuters Markets" xmlUrl="https://news.google.com/rss/search?q=site:reuters.com+markets&amp;hl=en-US&amp;gl=US&amp;ceid=US:en"/>
+      <outline type="rss" text="Bloomberg Markets" title="Bloomberg Markets" xmlUrl="https://feeds.bloomberg.com/markets/news.rss"/>
+      <outline type="rss" text="Financial Times Markets (Google News)" title="Financial Times Markets" xmlUrl="https://news.google.com/rss/search?q=site:ft.com+markets&amp;hl=en-US&amp;gl=US&amp;ceid=US:en"/>
+      <outline type="rss" text="BBC Business" title="BBC Business" xmlUrl="https://feeds.bbci.co.uk/news/business/rss.xml"/>
+    </outline>
+
+    <outline text="Central Banks &amp; Macro" title="Central Banks &amp; Macro">
+      <outline type="rss" text="Federal Reserve Press" title="Federal Reserve Press" xmlUrl="https://www.federalreserve.gov/feeds/press_all.xml"/>
+      <outline type="rss" text="ECB Press" title="ECB Press" xmlUrl="https://www.ecb.europa.eu/rss/press.html"/>
+      <outline type="rss" text="BIS (Bank for International Settlements)" title="BIS" xmlUrl="https://www.bis.org/rss/feed.rss"/>
+      <outline type="rss" text="IMF News" title="IMF News" xmlUrl="https://www.imf.org/en/News/RSS"/>
+      <outline type="rss" text="OECD News" title="OECD News" xmlUrl="https://www.oecd.org/newsroom/rss.xml"/>
+      <outline type="rss" text="World Bank News" title="World Bank News" xmlUrl="https://www.worldbank.org/en/news/all?format=rss"/>
+      <outline type="rss" text="Trading Economics" title="Trading Economics" xmlUrl="https://tradingeconomics.com/rss"/>
+      <outline type="rss" text="FRED (Federal Reserve Economic Data)" title="FRED" xmlUrl="https://fredblog.stlouisfed.org/feed/"/>
+      <outline type="rss" text="Google News — Fed &amp; Interest Rates" title="Google News — Fed &amp; Rates" xmlUrl="https://news.google.com/rss/search?q=Federal+Reserve+interest+rates&amp;hl=en-US&amp;gl=US&amp;ceid=US:en"/>
+      <outline type="rss" text="Google News — Recession, Inflation &amp; GDP" title="Google News — Macro" xmlUrl="https://news.google.com/rss/search?q=recession+inflation+GDP&amp;hl=en-US&amp;gl=US&amp;ceid=US:en"/>
+    </outline>
+
+    <outline text="Stocks &amp; Analysis" title="Stocks &amp; Analysis">
+      <outline type="rss" text="Seeking Alpha" title="Seeking Alpha" xmlUrl="https://seekingalpha.com/market_currents.xml"/>
+      <outline type="rss" text="Motley Fool" title="Motley Fool" xmlUrl="https://www.fool.com/feeds/index.aspx"/>
+      <outline type="rss" text="StockNews" title="StockNews" xmlUrl="https://stocknews.com/feed/"/>
+      <outline type="rss" text="Nasdaq News" title="Nasdaq News" xmlUrl="https://www.nasdaq.com/feed/rssoutbound?category=markets"/>
+      <outline type="rss" text="ETF.com" title="ETF.com" xmlUrl="https://www.etf.com/feed"/>
+      <outline type="rss" text="Investing.com - All News" title="Investing.com - All News" xmlUrl="https://www.investing.com/rss/news.rss"/>
+      <outline type="rss" text="Investing.com - Breaking News Headlines" title="Investing.com - Breaking News Headlines" xmlUrl="https://www.investing.com/rss/news_462.rss"/>
+      <outline type="rss" text="Investing.com - Stock Markets Analysis" title="Investing.com - Stock Analysis" xmlUrl="https://www.investing.com/rss/stock.rss"/>
+      <outline type="rss" text="Investing.com - Stock Analyst Ratings" title="Investing.com - Analyst Ratings" xmlUrl="https://www.investing.com/rss/news_1061.rss"/>
+      <outline type="rss" text="Investing.com - Earnings Reports" title="Investing.com - Earnings" xmlUrl="https://www.investing.com/rss/news_1062.rss"/>
+    </outline>
+
+    <outline text="Technology &amp; AI" title="Technology &amp; AI">
+      <outline type="rss" text="NVIDIA Blog" title="NVIDIA Blog" xmlUrl="https://blogs.nvidia.com/feed/"/>
+      <outline type="rss" text="Google AI Blog" title="Google AI Blog" xmlUrl="https://blog.google/technology/ai/rss/"/>
+      <outline type="rss" text="Microsoft AI Blog" title="Microsoft AI Blog" xmlUrl="https://blogs.microsoft.com/ai/feed/"/>
+      <outline type="rss" text="OpenAI Blog" title="OpenAI Blog" xmlUrl="https://openai.com/blog/rss.xml"/>
+      <outline type="rss" text="TechCrunch" title="TechCrunch" xmlUrl="https://techcrunch.com/feed/"/>
+      <outline type="rss" text="MIT Technology Review" title="MIT Tech Review" xmlUrl="https://www.technologyreview.com/feed/"/>
+      <outline type="rss" text="VentureBeat AI" title="VentureBeat AI" xmlUrl="https://venturebeat.com/category/ai/feed/"/>
+      <outline type="rss" text="The Verge AI" title="The Verge AI" xmlUrl="https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"/>
+      <outline type="rss" text="Semiconductor Engineering" title="SemiEngineering" xmlUrl="https://semiengineering.com/feed/"/>
+    </outline>
+
+    <outline text="Commodities &amp; Energy" title="Commodities &amp; Energy">
+      <outline type="rss" text="OilPrice" title="OilPrice" xmlUrl="https://oilprice.com/rss/main"/>
+      <outline type="rss" text="EIA Energy News" title="EIA Energy News" xmlUrl="https://www.eia.gov/rss/"/>
+      <outline type="rss" text="World Oil" title="World Oil" xmlUrl="https://www.worldoil.com/rss"/>
+      <outline type="rss" text="Natural Gas Intelligence" title="NatGas Intel" xmlUrl="https://www.naturalgasintel.com/feed/"/>
+      <outline type="rss" text="Mining.com" title="Mining.com" xmlUrl="https://www.mining.com/feed/"/>
+      <outline type="rss" text="Kitco Gold" title="Kitco Gold" xmlUrl="https://www.kitco.com/rss/"/>
+      <outline type="rss" text="Investing.com - Commodities Analysis" title="Investing.com - Commodities" xmlUrl="https://www.investing.com/rss/commodities.rss"/>
+    </outline>
+
+    <outline text="Crypto" title="Crypto">
+      <outline type="rss" text="CoinDesk" title="CoinDesk" xmlUrl="https://www.coindesk.com/arc/outboundfeeds/rss/"/>
+      <outline type="rss" text="Cointelegraph" title="Cointelegraph" xmlUrl="https://cointelegraph.com/rss"/>
+      <outline type="rss" text="Bitcoin Magazine" title="Bitcoin Magazine" xmlUrl="https://bitcoinmagazine.com/.rss/full/"/>
+      <outline type="rss" text="Blockworks" title="Blockworks" xmlUrl="https://blockworks.co/feed"/>
+      <outline type="rss" text="The Block" title="The Block" xmlUrl="https://www.theblock.co/rss.xml"/>
+    </outline>
+
+    <outline text="Reddit Sentiment" title="Reddit Sentiment">
+      <outline type="rss" text="r/wallstreetbets" title="r/wallstreetbets" xmlUrl="https://www.reddit.com/r/wallstreetbets/.rss"/>
+      <outline type="rss" text="r/stocks" title="r/stocks" xmlUrl="https://www.reddit.com/r/stocks/.rss"/>
+      <outline type="rss" text="r/investing" title="r/investing" xmlUrl="https://www.reddit.com/r/investing/.rss"/>
+      <outline type="rss" text="r/options" title="r/options" xmlUrl="https://www.reddit.com/r/options/.rss"/>
+      <outline type="rss" text="r/ValueInvesting" title="r/ValueInvesting" xmlUrl="https://www.reddit.com/r/ValueInvesting/.rss"/>
+    </outline>
+
+    <outline text="Investor Blogs" title="Investor Blogs">
+      <outline type="rss" text="A Wealth of Common Sense" title="A Wealth of Common Sense" xmlUrl="https://awealthofcommonsense.com/feed/"/>
+      <outline type="rss" text="Meb Faber Research" title="Meb Faber Research" xmlUrl="https://mebfaber.com/feed/"/>
+      <outline type="rss" text="Howard Marks / Oaktree" title="Howard Marks / Oaktree" xmlUrl="https://www.oaktreecapital.com/insights/rss"/>
+      <outline type="rss" text="Aswath Damodaran" title="Aswath Damodaran" xmlUrl="https://aswathdamodaran.blogspot.com/feeds/posts/default"/>
+    </outline>
+  </body>
+</opml>
